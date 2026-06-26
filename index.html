@@ -925,6 +925,8 @@ input, select, textarea { font-family: inherit; }
       <button class="fc" data-f="home"       onclick="setHF('home',this)">🏠 Home</button>
       <button class="fc" data-f="equipment"  onclick="setHF('equipment',this)">🔧 Equipment</button>
       <button class="fc" data-f="training"   onclick="setHF('training',this)">🎓 Training</button>
+      <button class="fc" data-f="stationery" onclick="setHF('stationery',this)">✏️ Stationery</button>
+      <button class="fc" data-f="postage"    onclick="setHF('postage',this)">📬 Postage</button>
       <button class="fc" data-f="other"      onclick="setHF('other',this)">📦 Other</button>
     </div>
     <div class="scroll-body" id="h-list"></div>
@@ -1127,7 +1129,7 @@ input, select, textarea { font-family: inherit; }
      • the service-worker cache name (so caches bust)
      • the "new version available" refresh banner
    ═══════════════════════════════════════ */
-const APP_VERSION = '2.1.1';
+const APP_VERSION = '2.2.0';
 
 /* ═══════════════════════════════════════
    SECURITY: HTML ESCAPE
@@ -1329,6 +1331,11 @@ async function delExp(id) {
   refreshDash(); if (document.getElementById('s-history').classList.contains('active')) renderHistory();
   toast('Deleted');
 }
+function confirmDel(id) {
+  if (!confirm('Delete this expense? This cannot be undone.')) return;
+  closeOv('ov-detail');
+  delExp(id);
+}
 
 /* ═══════════════════════════════════════════════
    NAVIGATION
@@ -1380,15 +1387,18 @@ function refreshDash() {
 
   // Category cards
   const CATS = [
-    { id:'mileage', label:'Mileage',    lbl:'journeys' },
-    { id:'parking', label:'Parking',    lbl:'receipts' },
-    { id:'books',   label:'Books',      lbl:'books' },
-    { id:'software',label:'Software',   lbl:'subscriptions' },
-    { id:'phone',   label:'Phone',      lbl:'entries' },
-    { id:'home',    label:'Home Office',lbl:'entries' },
-    { id:'equipment',label:'Equipment', lbl:'items' },
-    { id:'training',label:'Training',   lbl:'courses' },
-    { id:'other',   label:'Other',      lbl:'entries' },
+    { id:'mileage',    label:'Mileage',     lbl:'journeys' },
+    { id:'parking',    label:'Parking',     lbl:'receipts' },
+    { id:'books',      label:'Books',       lbl:'books' },
+    { id:'software',   label:'Software',    lbl:'subscriptions' },
+    { id:'phone',      label:'Phone',       lbl:'entries' },
+    { id:'internet',   label:'Internet',    lbl:'entries' },
+    { id:'home',       label:'Home Office', lbl:'entries' },
+    { id:'equipment',  label:'Equipment',   lbl:'items' },
+    { id:'training',   label:'Training',    lbl:'courses' },
+    { id:'stationery', label:'Stationery',  lbl:'entries' },
+    { id:'postage',    label:'Postage',     lbl:'entries' },
+    { id:'other',      label:'Other',       lbl:'entries' },
   ];
   document.getElementById('dash-cat-grid').innerHTML = CATS.map(c => {
     const items = yr.filter(e => e.category === c.id);
@@ -1404,7 +1414,7 @@ function refreshDash() {
   }).join('');
 
   // Recent (all expenses sorted by date, last 6)
-  const recent = expenses.filter(e=>e.tax_year===dashYear).slice(0,6);
+  const recent = expenses.filter(e=>e.tax_year===dashYear).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6);
   document.getElementById('dash-recent').innerHTML = recent.length
     ? recent.map(e => tlItem(e)).join('')
     : `<div class="empty"><div class="empty-em">📋</div><div class="empty-h">No expenses yet</div><div class="empty-s">Tap the gold + button to record your first expense.</div></div>`;
@@ -1508,7 +1518,7 @@ function showDetail(id) {
       ${dRow('Tax Year', taxYearLabel(e.tax_year) + (isCurrent?' (Current)':''))}
     </div>
     <div class="btn-row">
-      <button class="btn btn-danger" onclick="delExp('${esc(e.id)}');closeOv('ov-detail')">Delete</button>
+      <button class="btn btn-danger" onclick="confirmDel('${esc(e.id)}')">Delete</button>
       <button class="btn btn-outline" onclick="closeOv('ov-detail')">Close</button>
     </div>`;
   openOv('ov-detail');
@@ -2304,8 +2314,9 @@ function exportAccountant(data, label) {
 }
 function dlFile(content, name, type) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([content],{type}));
-  a.download = name; a.click();
+  const url = URL.createObjectURL(new Blob([content],{type}));
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /* ═══════════════════════════════════════════════
@@ -2333,15 +2344,15 @@ function buildForm(cat) {
     <button class="btn btn-outline btn-sm mt-8" style="width:100%;margin-bottom:12px" onclick="calcDist()">📍 Calculate Distance</button>
     <div id="dist-res" class="hidden"></div>
     <div class="field-row">
-      <div class="field"><label>Miles</label><input type="number" id="f-miles" step="0.1" placeholder="0.0" oninput="calcClaim()"></div>
-      <div class="field"><label>Rate (£/mi)</label><input type="number" id="f-rate" step="0.01" value="${CFG.rate}" oninput="calcClaim()"></div>
+      <div class="field"><label>Miles</label><input type="number" id="f-miles" step="0.1" min="0" placeholder="0.0" oninput="calcClaim()"></div>
+      <div class="field"><label>Rate (£/mi)</label><input type="number" id="f-rate" step="0.01" min="0" value="${CFG.rate}" oninput="calcClaim()"></div>
     </div>
     <div class="field"><label>Claim Value</label><input type="number" id="f-claim" step="0.01" placeholder="0.00"></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Additional details"></textarea></div>
     <button class="btn btn-gold" onclick="submitForm('mileage')">Save Journey</button>`;
 
   if (cat === 'parking') return `${df}
-    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" placeholder="0.00" inputmode="decimal"></div>
+    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" min="0.01" placeholder="0.00" inputmode="decimal"></div>
     <div class="field"><label>Location</label><input type="text" id="f-location" placeholder="e.g. City Hospital Car Park"></div>
     <div class="field"><label>Reason</label><input type="text" id="f-reason" placeholder="e.g. Pastoral Visit"></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Ticket ref, meter…"></textarea></div>
@@ -2349,7 +2360,7 @@ function buildForm(cat) {
 
   if (cat === 'books') return `${df}
     <div class="field"><label>Book Title</label><input type="text" id="f-title" placeholder="e.g. Fiqh Essentials Vol.1"></div>
-    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" placeholder="0.00" inputmode="decimal"></div>
+    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" min="0.01" placeholder="0.00" inputmode="decimal"></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Author, ISBN…"></textarea></div>
     <button class="btn btn-gold" onclick="submitForm('books')">Save Book</button>`;
 
@@ -2358,7 +2369,7 @@ function buildForm(cat) {
       <div class="pills">${['Claude','ChatGPT','Microsoft 365','Google Workspace','Cloudflare','Supabase','Domain Renewal','Hosting','Zoom','Other'].map(s=>`<button class="p-btn" onclick="setPill(this,'f-software','${s}')">${s}</button>`).join('')}</div>
       <input type="text" id="f-software" placeholder="or type name…">
     </div>
-    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" placeholder="0.00" inputmode="decimal"></div>
+    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" min="0.01" placeholder="0.00" inputmode="decimal"></div>
     <div class="field"><label>Billing</label>
       <select id="f-sub"><option value="monthly">Monthly</option><option value="annual">Annual</option><option value="one-off">One-off</option></select>
     </div>
@@ -2366,13 +2377,13 @@ function buildForm(cat) {
     <button class="btn btn-gold" onclick="submitForm('software')">Save Software</button>`;
 
   if (cat === 'phone') return `${df}
-    <div class="field"><label>Bill Amount (£)</label><input type="number" id="f-amount" step="0.01" placeholder="0.00" inputmode="decimal"></div>
+    <div class="field"><label>Bill Amount (£)</label><input type="number" id="f-amount" step="0.01" min="0.01" placeholder="0.00" inputmode="decimal"></div>
     <div class="field"><label>Ministry Use %</label><input type="number" id="f-pct" min="0" max="100" placeholder="60" value="60"><div class="hint">Only the ministry-use portion will be claimed</div></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Provider, plan…"></textarea></div>
     <button class="btn btn-gold" onclick="submitForm('phone')">Save Phone Expense</button>`;
 
   if (cat === 'home') return `${df}
-    <div class="field"><label>Total Amount (£)</label><input type="number" id="f-amount" step="0.01" placeholder="0.00" inputmode="decimal"></div>
+    <div class="field"><label>Total Amount (£)</label><input type="number" id="f-amount" step="0.01" min="0.01" placeholder="0.00" inputmode="decimal"></div>
     <div class="field"><label>Ministry Use %</label><input type="number" id="f-pct" min="0" max="100" placeholder="25" value="25"></div>
     <div class="field"><label>Description</label><input type="text" id="f-desc" placeholder="e.g. Broadband bill, utility portion…"></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes"></textarea></div>
@@ -2380,7 +2391,7 @@ function buildForm(cat) {
 
   if (cat === 'equipment') return `${df}
     <div class="field"><label>Item</label><input type="text" id="f-item" placeholder="e.g. USB Microphone"></div>
-    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" placeholder="0.00" inputmode="decimal"></div>
+    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" min="0.01" placeholder="0.00" inputmode="decimal"></div>
     <div class="field"><label>Ministry Use %</label><input type="number" id="f-pct" min="0" max="100" placeholder="80" value="80"></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Supplier, warranty…"></textarea></div>
     <button class="btn btn-gold" onclick="submitForm('equipment')">Save Equipment</button>`;
@@ -2388,7 +2399,7 @@ function buildForm(cat) {
   // Generic: training, stationery, postage, internet, other
   return `${df}
     <div class="field"><label>Description</label><input type="text" id="f-desc" placeholder="Describe the expense"></div>
-    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" placeholder="0.00" inputmode="decimal"></div>
+    <div class="field"><label>Amount (£)</label><input type="number" id="f-amount" step="0.01" min="0.01" placeholder="0.00" inputmode="decimal"></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Additional details…"></textarea></div>
     <button class="btn btn-gold" onclick="submitForm('${cat}')">Save Expense</button>`;
 }
@@ -2417,17 +2428,13 @@ async function calcDist() {
   const start = document.getElementById('f-start')?.value?.trim();
   const end   = document.getElementById('f-end')?.value?.trim();
   if (!start||!end) { toast('Enter both locations','err'); return; }
-  const mi = (5 + Math.random()*38).toFixed(1);
-  const cl = (mi * CFG.rate).toFixed(2);
-  document.getElementById('f-miles').value = mi;
-  document.getElementById('f-claim').value = cl;
   const el = document.getElementById('dist-res');
   el.classList.remove('hidden');
-  el.innerHTML = `<div class="dist-card">
-    <div><div class="d-lbl">Distance</div><div class="d-miles">${mi} miles</div></div>
-    <div style="text-align:right"><div class="d-lbl">Claim Value</div><div class="d-claim">£${cl}</div></div>
+  el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:6px">
+    <div style="font-size:13px;font-weight:600;color:var(--text-body)">Enter miles manually</div>
+    <div style="font-size:12px;color:var(--text-muted);line-height:1.5">Use your vehicle odometer or a mapping service to find the exact distance, then enter it in the Miles field. Accurate mileage is required for HMRC claims.</div>
   </div>`;
-  toast('Distance calculated');
+  toast('Check your odometer or a mapping service for exact miles','err');
 }
 
 async function submitForm(cat) {
@@ -2448,33 +2455,33 @@ async function submitForm(cat) {
         notes:document.getElementById('f-notes')?.value||'' };
     } else if (cat==='parking') {
       const amt = parseFloat(document.getElementById('f-amount')?.value)||0;
-      if (!amt) { toast('Enter amount','err'); return; }
+      if (amt <= 0) { toast('Enter amount','err'); return; }
       p = {...p, amount:amt, description:document.getElementById('f-location')?.value||'Parking',
         notes:((document.getElementById('f-reason')?.value||'')+' '+(document.getElementById('f-notes')?.value||'')).trim() };
     } else if (cat==='books') {
       const title = document.getElementById('f-title')?.value?.trim();
       const amt   = parseFloat(document.getElementById('f-amount')?.value)||0;
       if (!title){ toast('Enter title','err'); return; }
-      if (!amt)  { toast('Enter amount','err'); return; }
+      if (amt <= 0) { toast('Enter amount','err'); return; }
       p = {...p, amount:amt, description:title, notes:document.getElementById('f-notes')?.value||'' };
     } else if (cat==='software') {
       const name = document.getElementById('f-software')?.value?.trim();
       const amt  = parseFloat(document.getElementById('f-amount')?.value)||0;
       const sub  = document.getElementById('f-sub')?.value||'monthly';
       if (!name){ toast('Enter software name','err'); return; }
-      if (!amt) { toast('Enter amount','err'); return; }
+      if (amt <= 0) { toast('Enter amount','err'); return; }
       p = {...p, amount:amt, description:`${name} (${sub})`, notes:document.getElementById('f-notes')?.value||'' };
     } else if (['phone','home','equipment'].includes(cat)) {
       const tot = parseFloat(document.getElementById('f-amount')?.value)||0;
       const pct = parseFloat(document.getElementById('f-pct')?.value)||100;
-      if (!tot) { toast('Enter amount','err'); return; }
+      if (tot <= 0) { toast('Enter amount','err'); return; }
       const claim = Math.round(tot*pct/100*100)/100;
       const desc  = document.getElementById('f-item')?.value?.trim() || document.getElementById('f-desc')?.value?.trim() || catLabel(cat);
       p = {...p, amount:claim, description:desc, notes:`Total: £${tot} @ ${pct}% ministry. ${document.getElementById('f-notes')?.value||''}`.trim() };
     } else {
       const desc = document.getElementById('f-desc')?.value?.trim();
       const amt  = parseFloat(document.getElementById('f-amount')?.value)||0;
-      if (!amt) { toast('Enter amount','err'); return; }
+      if (amt <= 0) { toast('Enter amount','err'); return; }
       p = {...p, amount:amt, description:desc||catLabel(cat), notes:document.getElementById('f-notes')?.value||'' };
     }
     const ok = await saveExp(p);
@@ -2526,7 +2533,7 @@ function editName() {
   const name = me?.user_metadata?.full_name||'';
   document.getElementById('set-title').textContent = 'Your Name';
   document.getElementById('set-body').innerHTML = `
-    <div class="field"><label>Full Name</label><input type="text" id="en" value="${name}" placeholder="Imam Abdullah"></div>
+    <div class="field"><label>Full Name</label><input type="text" id="en" value="${esc(name)}" placeholder="Imam Abdullah"></div>
     <button class="btn btn-gold" onclick="saveName()">Save</button>`;
   openOv('ov-set');
 }
