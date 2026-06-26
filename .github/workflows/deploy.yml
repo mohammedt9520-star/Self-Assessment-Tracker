@@ -15,6 +15,7 @@ jobs:
           mkdir -p dist
           # Only ship the runtime web app — not docs/, supabase/, .github/ or .git/
           cp index.html manifest.json sw.js _headers _redirects dist/
+          cp -r icons dist/
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
