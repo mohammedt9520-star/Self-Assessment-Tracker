@@ -1129,7 +1129,7 @@ input, select, textarea { font-family: inherit; }
      • the service-worker cache name (so caches bust)
      • the "new version available" refresh banner
    ═══════════════════════════════════════ */
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.3.1';
 
 /* ═══════════════════════════════════════
    SECURITY: HTML ESCAPE
@@ -2565,6 +2565,15 @@ async function submitForm(cat) {
       editingId = null;
       closeOv('ov-form');
       refreshDash();
+      if (!isEdit) {
+        // Reset history filters so the new expense is always visible
+        hFilter = 'all';
+        const searchEl = document.getElementById('h-search');
+        if (searchEl) searchEl.value = '';
+        document.querySelectorAll('.fc').forEach(b => b.classList.remove('on'));
+        const allBtn = document.querySelector('.fc[data-f="all"]');
+        if (allBtn) allBtn.classList.add('on');
+      }
       if (document.getElementById('s-history').classList.contains('active')) renderHistory();
       toast(isEdit ? 'Updated ✓' : 'Saved ✓');
     }
