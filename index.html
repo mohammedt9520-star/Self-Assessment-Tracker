@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co; img-src 'self' data: blob:; font-src 'self' https://fonts.gstatic.com;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co https://nominatim.openstreetmap.org https://router.project-osrm.org; img-src 'self' data: blob:; font-src 'self' https://fonts.gstatic.com;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0f2318">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -816,6 +816,22 @@ input, select, textarea { font-family: inherit; }
   transition: transform 0.15s;
 }
 #update-banner .ub-btn:active { transform: scale(0.94); }
+
+/* ── Location autocomplete ── */
+.loc-presets { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.loc-preset-btn { padding: 5px 14px; border-radius: var(--r-pill); background: rgba(46,112,73,0.08); border: 1px solid rgba(46,112,73,0.25); color: var(--grove); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.loc-preset-btn:active { background: rgba(46,112,73,0.18); }
+.loc-preset-btn.unset { opacity: 0.4; pointer-events: none; }
+.loc-wrap { position: relative; }
+.loc-sugg { position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 500; background: var(--white); border: 1px solid var(--linen); border-radius: var(--r-md); box-shadow: var(--sh-lg); max-height: 220px; overflow-y: auto; }
+.loc-sugg.hidden { display: none; }
+.sugg-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--linen); transition: background 0.12s; }
+.sugg-item:last-child { border-bottom: none; }
+.sugg-item:active, .sugg-item:hover { background: var(--alabaster); }
+.sugg-primary { font-size: 13px; color: var(--text-body); font-weight: 500; line-height: 1.3; }
+.sugg-secondary { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.sugg-searching { padding: 12px 14px; font-size: 13px; color: var(--text-muted); text-align: center; }
+.osm-credit { font-size: 11px; color: var(--text-faint); text-align: center; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -1003,6 +1019,20 @@ input, select, textarea { font-family: inherit; }
         </div>
 
         <div class="set-group">
+          <div class="set-group-label">Saved Locations</div>
+          <div class="set-card">
+            <div class="set-row" onclick="editLocation('home')">
+              <span class="sr-label">🏠 Home</span>
+              <span class="sr-value" id="disp-home">Not set <svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></span>
+            </div>
+            <div class="set-row" onclick="editLocation('work')">
+              <span class="sr-label">🕌 Work / Mosque</span>
+              <span class="sr-value" id="disp-work">Not set <svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="set-group">
           <div class="set-group-label">App</div>
           <div class="set-card">
             <div class="set-row hidden" id="install-row" onclick="doInstall()">
@@ -1129,7 +1159,7 @@ input, select, textarea { font-family: inherit; }
      • the service-worker cache name (so caches bust)
      • the "new version available" refresh banner
    ═══════════════════════════════════════ */
-const APP_VERSION = '2.3.1';
+const APP_VERSION = '2.4.0';
 
 /* ═══════════════════════════════════════
    SECURITY: HTML ESCAPE
@@ -1157,6 +1187,11 @@ const CFG = {
    STATE
 ═══════════════════════════════════════════════ */
 let _db = null, me = null, expenses = [], hFilter = 'all', dashYear = null, editingId = null;
+let locCoords = { start: null, end: null };
+const _suggResults = { start: [], end: [], edit: [] };
+const _locDebounce = {};
+let _locEditCoords = null;
+let _locEditType = null;
 
 /* ═══════════════════════════════════════════════
    SUPABASE
@@ -2357,6 +2392,7 @@ function buildForm(cat, e = null) {
   const df = `<div class="field"><label>Date</label><input type="date" id="f-date" value="${dateVal}" onchange="showTaxYearHint()"><div class="hint" id="ty-hint">Tax year: ${taxYearLabel(taxYear(new Date(dateVal+'T12:00:00')))}</div></div>`;
 
   if (cat === 'mileage') {
+    locCoords = { start: null, end: null };
     const pur   = esc(e?.description || '');
     const start = esc(e?.start_location || '');
     const end_  = esc(e?.end_location || '');
@@ -2364,15 +2400,36 @@ function buildForm(cat, e = null) {
     const rate  = e?.mileage_rate ?? CFG.rate;
     const claim = e?.claim ?? '';
     const notes = esc(e?.notes || '');
+    const hasHome = !!localStorage.getItem('loc_home');
+    const hasWork = !!localStorage.getItem('loc_work');
     return `${df}
     <div class="field"><label>Journey Purpose</label>
       <div class="pills">${['Hospital Visit','Bereavement Visit','Funeral','Janazah','Home Visit','Pastoral Care','Meeting','Teaching','Madrasa','Class Admin','Training','Community Visit','Other'].map(p=>`<button class="p-btn${e?.description===p?' on':''}" onclick="setPill(this,'f-purpose','${p}')">${p}</button>`).join('')}</div>
       <input type="text" id="f-purpose" value="${pur}" placeholder="or type your own…">
     </div>
-    <div class="field"><label>From</label><input type="text" id="f-start" value="${start}" placeholder="e.g. Mosque, Birmingham B12"></div>
-    <div class="field"><label>To</label><input type="text" id="f-end" value="${end_}" placeholder="e.g. City Hospital, Birmingham"></div>
-    <button class="btn btn-outline btn-sm mt-8" style="width:100%;margin-bottom:12px" onclick="calcDist()">📍 Calculate Distance</button>
+    <div class="field"><label>From</label>
+      <div class="loc-presets">
+        <button class="loc-preset-btn${hasHome?'':' unset'}" onclick="setLocPreset('start','home')">🏠 Home</button>
+        <button class="loc-preset-btn${hasWork?'':' unset'}" onclick="setLocPreset('start','work')">🕌 Work</button>
+      </div>
+      <div class="loc-wrap">
+        <input type="text" id="f-start" value="${start}" placeholder="Search address…" oninput="locSearch('start',this.value)" onblur="closeSugg('start')" autocomplete="off">
+        <div class="loc-sugg hidden" id="sugg-start"></div>
+      </div>
+    </div>
+    <div class="field"><label>To</label>
+      <div class="loc-presets">
+        <button class="loc-preset-btn${hasHome?'':' unset'}" onclick="setLocPreset('end','home')">🏠 Home</button>
+        <button class="loc-preset-btn${hasWork?'':' unset'}" onclick="setLocPreset('end','work')">🕌 Work</button>
+      </div>
+      <div class="loc-wrap">
+        <input type="text" id="f-end" value="${end_}" placeholder="Search address…" oninput="locSearch('end',this.value)" onblur="closeSugg('end')" autocomplete="off">
+        <div class="loc-sugg hidden" id="sugg-end"></div>
+      </div>
+    </div>
+    <button class="btn btn-outline btn-sm mt-8" style="width:100%;margin-bottom:12px" onclick="calcDist()">📍 Calculate Driving Distance</button>
     <div id="dist-res" class="hidden"></div>
+    <div class="osm-credit" style="margin-top:-8px;margin-bottom:12px">Route data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style="color:inherit">OpenStreetMap</a> contributors</div>
     <div class="field-row">
       <div class="field"><label>Miles</label><input type="number" id="f-miles" step="0.1" min="0" value="${miles}" placeholder="0.0" oninput="calcClaim()"></div>
       <div class="field"><label>Rate (£/mi)</label><input type="number" id="f-rate" step="0.01" min="0" value="${rate}" oninput="calcClaim()"></div>
@@ -2500,16 +2557,63 @@ function calcClaim() {
   if (el) el.value = (miles*rate).toFixed(2);
 }
 async function calcDist() {
-  const start = document.getElementById('f-start')?.value?.trim();
-  const end   = document.getElementById('f-end')?.value?.trim();
-  if (!start||!end) { toast('Enter both locations','err'); return; }
   const el = document.getElementById('dist-res');
+  if (!el) return;
   el.classList.remove('hidden');
-  el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:6px">
-    <div style="font-size:13px;font-weight:600;color:var(--text-body)">Enter miles manually</div>
-    <div style="font-size:12px;color:var(--text-muted);line-height:1.5">Use your vehicle odometer or a mapping service to find the exact distance, then enter it in the Miles field. Accurate mileage is required for HMRC claims.</div>
-  </div>`;
-  toast('Check your odometer or a mapping service for exact miles','err');
+
+  async function geocodeField(field) {
+    if (locCoords[field]) return true;
+    const val = document.getElementById('f-'+field)?.value?.trim();
+    if (!val) return false;
+    try {
+      el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:4px"><div style="font-size:13px;color:var(--text-muted)">Geocoding ${field === 'start' ? 'start' : 'destination'}…</div></div>`;
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&countrycodes=gb&limit=1`, { headers: { 'Accept-Language': 'en' } });
+      const data = await res.json();
+      if (!data.length) return false;
+      locCoords[field] = { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+      return true;
+    } catch { return false; }
+  }
+
+  const startOk = await geocodeField('start');
+  const endOk   = await geocodeField('end');
+
+  if (!startOk || !endOk) {
+    el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:6px">
+      <div style="font-size:13px;font-weight:600;color:var(--danger)">Could not find location</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.5">Try searching and selecting from the autocomplete list, or enter miles manually below.</div>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:4px"><div style="font-size:13px;color:var(--text-muted)">Calculating driving route…</div></div>`;
+
+  try {
+    const { lat: lat1, lon: lon1 } = locCoords.start;
+    const { lat: lat2, lon: lon2 } = locCoords.end;
+    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.routes?.length) throw new Error('No route found');
+    const metres = data.routes[0].distance;
+    const km     = metres / 1000;
+    const miles  = km / 1.60934;
+    const roundedMiles = Math.round(miles * 10) / 10;
+
+    const mEl = document.getElementById('f-miles');
+    if (mEl) { mEl.value = roundedMiles; calcClaim(); }
+
+    el.innerHTML = `<div class="dist-card">
+      <div class="dist-val">${roundedMiles.toFixed(1)} <span class="dist-unit">mi</span></div>
+      <div class="dist-meta">${km.toFixed(1)} km driving · auto-filled below</div>
+    </div>`;
+    toast('Distance calculated ✓');
+  } catch(err) {
+    el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:6px">
+      <div style="font-size:13px;font-weight:600;color:var(--danger)">Route unavailable</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.5">${esc(err.message||'Could not calculate route')}. Please enter miles manually.</div>
+    </div>`;
+  }
 }
 
 async function submitForm(cat) {
@@ -2594,6 +2698,22 @@ function loadSettingsDisplay() {
   if (en) en.innerHTML = `${me?.user_metadata?.full_name||'–'} <svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
   const ee = document.getElementById('disp-email');
   if (ee) ee.textContent = me?.email||'–';
+  loadSavedLoc();
+}
+function loadSavedLoc() {
+  const chev = `<svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
+  for (const type of ['home','work']) {
+    const el = document.getElementById('disp-'+type);
+    if (!el) continue;
+    const saved = localStorage.getItem('loc_'+type);
+    if (saved) {
+      const d = JSON.parse(saved);
+      const short = d.label.split(',')[0];
+      el.innerHTML = `${short} ${chev}`;
+    } else {
+      el.innerHTML = `Not set ${chev}`;
+    }
+  }
 }
 function editRate() {
   document.getElementById('set-title').textContent = 'Mileage Rate';
@@ -2629,6 +2749,145 @@ async function saveName() {
   if (_db) { const { error } = await _db.auth.updateUser({ data:{ full_name:n } }); if (error) { toast(error.message,'err'); return; } }
   if (me) me.user_metadata = {...me.user_metadata, full_name:n};
   loadSettingsDisplay(); refreshDash(); closeOv('ov-set'); toast('Name updated');
+}
+
+/* ═══════════════════════════════════════════════
+   LOCATION (OpenStreetMap / Nominatim / OSRM)
+═══════════════════════════════════════════════ */
+function editLocation(type) {
+  _locEditType = type;
+  _locEditCoords = null;
+  const saved = localStorage.getItem('loc_'+type);
+  const label = type === 'home' ? '🏠 Home' : '🕌 Work / Mosque';
+  const savedLabel = saved ? JSON.parse(saved).label : '';
+  document.getElementById('set-title').textContent = 'Set ' + label;
+  document.getElementById('set-body').innerHTML = `
+    <div class="field">
+      <label>Search address</label>
+      <div class="loc-wrap">
+        <input type="text" id="loc-edit-input" value="${esc(savedLabel)}" placeholder="Start typing an address…" oninput="locEditSearch(this.value)" autocomplete="off">
+        <div class="loc-sugg hidden" id="loc-edit-sugg"></div>
+      </div>
+      <div class="osm-credit">Address data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style="color:inherit">OpenStreetMap</a> contributors</div>
+    </div>
+    ${saved ? `<button class="btn btn-outline btn-sm" style="margin-bottom:12px;width:100%;color:var(--danger);border-color:var(--danger)" onclick="clearLocation('${type}')">Clear saved location</button>` : ''}
+    <button class="btn btn-gold" id="loc-save-btn" onclick="saveLocation('${type}')" ${saved ? '' : 'disabled'}>Save Location</button>`;
+  if (saved) {
+    const d = JSON.parse(saved);
+    _locEditCoords = { lat: d.lat, lon: d.lon };
+  }
+  openOv('ov-set');
+}
+function locEditSearch(q) {
+  clearTimeout(_locDebounce.edit);
+  const sugg = document.getElementById('loc-edit-sugg');
+  if (!q || q.length < 3) { if (sugg) sugg.classList.add('hidden'); return; }
+  if (sugg) { sugg.classList.remove('hidden'); sugg.innerHTML = `<div class="sugg-searching">Searching…</div>`; }
+  _locDebounce.edit = setTimeout(async () => {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=gb&limit=5&addressdetails=1`, { headers: { 'Accept-Language': 'en' } });
+      const data = await res.json();
+      _suggResults.edit = data;
+      if (!sugg) return;
+      if (!data.length) { sugg.innerHTML = `<div class="sugg-searching">No results found</div>`; return; }
+      sugg.innerHTML = data.map((r,i) => {
+        const parts = r.display_name.split(', ');
+        const primary = parts.slice(0,2).join(', ');
+        const secondary = parts.slice(2).join(', ');
+        return `<div class="sugg-item" onclick="selectLocEditSugg(${i})"><div class="sugg-primary">${esc(primary)}</div>${secondary?`<div class="sugg-secondary">${esc(secondary)}</div>`:''}</div>`;
+      }).join('');
+    } catch { if (sugg) sugg.innerHTML = `<div class="sugg-searching">Search failed — check connection</div>`; }
+  }, 350);
+}
+function selectLocEditSugg(idx) {
+  const r = _suggResults.edit[idx];
+  if (!r) return;
+  _locEditCoords = { lat: parseFloat(r.lat), lon: parseFloat(r.lon) };
+  const input = document.getElementById('loc-edit-input');
+  if (input) input.value = r.display_name;
+  const sugg = document.getElementById('loc-edit-sugg');
+  if (sugg) sugg.classList.add('hidden');
+  const btn = document.getElementById('loc-save-btn');
+  if (btn) btn.disabled = false;
+}
+function saveLocation(type) {
+  const input = document.getElementById('loc-edit-input');
+  if (!input || !_locEditCoords) { toast('Search and select an address first','err'); return; }
+  const label = input.value.trim();
+  if (!label) { toast('No address selected','err'); return; }
+  localStorage.setItem('loc_'+type, JSON.stringify({ label, lat: _locEditCoords.lat, lon: _locEditCoords.lon }));
+  loadSavedLoc();
+  closeOv('ov-set');
+  toast((type === 'home' ? '🏠 Home' : '🕌 Work') + ' location saved');
+}
+function clearLocation(type) {
+  localStorage.removeItem('loc_'+type);
+  loadSavedLoc();
+  closeOv('ov-set');
+  toast('Location cleared');
+}
+
+/* ── Mileage form location search ── */
+function locSearch(field, q) {
+  clearTimeout(_locDebounce[field]);
+  const sugg = document.getElementById('sugg-'+field);
+  if (!q || q.length < 3) {
+    locCoords[field] = null;
+    if (sugg) sugg.classList.add('hidden');
+    return;
+  }
+  locCoords[field] = null;
+  if (sugg) { sugg.classList.remove('hidden'); sugg.innerHTML = `<div class="sugg-searching">Searching…</div>`; }
+  _locDebounce[field] = setTimeout(async () => {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=gb&limit=5&addressdetails=1`, { headers: { 'Accept-Language': 'en' } });
+      const data = await res.json();
+      _suggResults[field] = data;
+      if (!sugg) return;
+      if (!data.length) { sugg.innerHTML = `<div class="sugg-searching">No results found</div>`; return; }
+      sugg.innerHTML = data.map((r,i) => {
+        const parts = r.display_name.split(', ');
+        const primary = parts.slice(0,2).join(', ');
+        const secondary = parts.slice(2).join(', ');
+        return `<div class="sugg-item" onclick="selectSugg('${field}',${i})"><div class="sugg-primary">${esc(primary)}</div>${secondary?`<div class="sugg-secondary">${esc(secondary)}</div>`:''}</div>`;
+      }).join('');
+    } catch { if (sugg) sugg.innerHTML = `<div class="sugg-searching">Search failed</div>`; }
+  }, 350);
+}
+function selectSugg(field, idx) {
+  const r = _suggResults[field]?.[idx];
+  if (!r) return;
+  locCoords[field] = { lat: parseFloat(r.lat), lon: parseFloat(r.lon) };
+  const input = document.getElementById('f-'+field);
+  if (input) input.value = r.display_name;
+  const sugg = document.getElementById('sugg-'+field);
+  if (sugg) sugg.classList.add('hidden');
+  tryAutoCalcDist();
+}
+function closeSugg(field) {
+  setTimeout(() => {
+    const sugg = document.getElementById('sugg-'+field);
+    if (sugg) sugg.classList.add('hidden');
+  }, 200);
+}
+function setLocPreset(field, type) {
+  const saved = localStorage.getItem('loc_'+type);
+  if (!saved) { toast('Set your ' + (type==='home'?'Home':'Work') + ' location in Settings first','err'); return; }
+  const d = JSON.parse(saved);
+  locCoords[field] = { lat: d.lat, lon: d.lon };
+  const input = document.getElementById('f-'+field);
+  if (input) input.value = d.label;
+  const sugg = document.getElementById('sugg-'+field);
+  if (sugg) sugg.classList.add('hidden');
+  tryAutoCalcDist();
+}
+async function tryAutoCalcDist() {
+  if (!locCoords.start || !locCoords.end) return;
+  const el = document.getElementById('dist-res');
+  if (!el) return;
+  el.classList.remove('hidden');
+  el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:4px"><div style="font-size:13px;color:var(--text-muted)">Calculating route…</div></div>`;
+  await calcDist();
 }
 
 /* ═══════════════════════════════════════════════
