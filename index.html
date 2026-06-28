@@ -1159,7 +1159,7 @@ input, select, textarea { font-family: inherit; }
      • the service-worker cache name (so caches bust)
      • the "new version available" refresh banner
    ═══════════════════════════════════════ */
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.4.1';
 
 /* ═══════════════════════════════════════
    SECURITY: HTML ESCAPE
@@ -1191,7 +1191,6 @@ let locCoords = { start: null, end: null };
 const _suggResults = { start: [], end: [], edit: [] };
 const _locDebounce = {};
 let _locEditCoords = null;
-let _locEditType = null;
 
 /* ═══════════════════════════════════════════════
    SUPABASE
@@ -1298,6 +1297,7 @@ function showAuth() {
 }
 function hideLoad() {
   const l = document.getElementById('loading');
+  if (!l) return;
   l.classList.add('out');
   setTimeout(() => l.remove(), 600);
 }
@@ -1339,7 +1339,8 @@ async function doSignOut() {
 ═══════════════════════════════════════════════ */
 async function fetchExp() {
   if (!_db || !me) return;
-  const { data } = await _db.from('expenses').select('*').eq('user_id', me.id).order('date', { ascending: false });
+  const { data, error } = await _db.from('expenses').select('*').eq('user_id', me.id).order('date', { ascending: false });
+  if (error) { toast('Failed to load expenses — ' + error.message, 'err'); return; }
   if (data) expenses = data;
 }
 async function saveExp(p) {
@@ -1378,6 +1379,7 @@ async function patchExp(id, p) {
     if (error) { toast(error.message, 'err'); return false; }
     const idx = expenses.findIndex(e => e.id === id);
     if (idx !== -1) expenses[idx] = data;
+    else await fetchExp();
   } else {
     toast('Database not connected', 'err');
     return false;
@@ -2349,6 +2351,7 @@ ${data.map(e=>`<tr><td>${esc(e.date)}</td><td>${esc(taxYearShort(e.tax_year))}</
 </body></html>`;
   const url = URL.createObjectURL(new Blob([html],{type:'text/html'}));
   window.open(url,'_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
   toast('PDF report opened — Print → Save as PDF');
 }
 
@@ -2560,13 +2563,13 @@ async function calcDist() {
   const el = document.getElementById('dist-res');
   if (!el) return;
   el.classList.remove('hidden');
+  el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:4px"><div style="font-size:13px;color:var(--text-muted)">Finding locations…</div></div>`;
 
   async function geocodeField(field) {
     if (locCoords[field]) return true;
     const val = document.getElementById('f-'+field)?.value?.trim();
     if (!val) return false;
     try {
-      el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:4px"><div style="font-size:13px;color:var(--text-muted)">Geocoding ${field === 'start' ? 'start' : 'destination'}…</div></div>`;
       const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&countrycodes=gb&limit=1`, { headers: { 'Accept-Language': 'en' } });
       const data = await res.json();
       if (!data.length) return false;
@@ -2575,8 +2578,7 @@ async function calcDist() {
     } catch { return false; }
   }
 
-  const startOk = await geocodeField('start');
-  const endOk   = await geocodeField('end');
+  const [startOk, endOk] = await Promise.all([geocodeField('start'), geocodeField('end')]);
 
   if (!startOk || !endOk) {
     el.innerHTML = `<div class="dist-card" style="flex-direction:column;gap:6px">
@@ -2707,9 +2709,11 @@ function loadSavedLoc() {
     if (!el) continue;
     const saved = localStorage.getItem('loc_'+type);
     if (saved) {
-      const d = JSON.parse(saved);
-      const short = d.label.split(',')[0];
-      el.innerHTML = `${short} ${chev}`;
+      try {
+        const d = JSON.parse(saved);
+        const short = (d.label || '').split(',')[0];
+        el.innerHTML = `${esc(short)} ${chev}`;
+      } catch { el.innerHTML = `Set address ${chev}`; localStorage.removeItem('loc_'+type); }
     } else {
       el.innerHTML = `Not set ${chev}`;
     }
@@ -2755,30 +2759,36 @@ async function saveName() {
    LOCATION (OpenStreetMap / Nominatim / OSRM)
 ═══════════════════════════════════════════════ */
 function editLocation(type) {
-  _locEditType = type;
   _locEditCoords = null;
   const saved = localStorage.getItem('loc_'+type);
   const label = type === 'home' ? '🏠 Home' : '🕌 Work / Mosque';
-  const savedLabel = saved ? JSON.parse(saved).label : '';
+  let savedLabel = '';
+  if (saved) {
+    try {
+      const d = JSON.parse(saved);
+      savedLabel = d.label || '';
+      _locEditCoords = { lat: d.lat, lon: d.lon };
+    } catch { localStorage.removeItem('loc_'+type); }
+  }
+  const hasSaved = !!_locEditCoords;
   document.getElementById('set-title').textContent = 'Set ' + label;
   document.getElementById('set-body').innerHTML = `
     <div class="field">
       <label>Search address</label>
       <div class="loc-wrap">
-        <input type="text" id="loc-edit-input" value="${esc(savedLabel)}" placeholder="Start typing an address…" oninput="locEditSearch(this.value)" autocomplete="off">
+        <input type="text" id="loc-edit-input" value="${esc(savedLabel)}" placeholder="Start typing an address…" oninput="locEditSearch(this.value)" onblur="closeSugg('edit')" autocomplete="off">
         <div class="loc-sugg hidden" id="loc-edit-sugg"></div>
       </div>
       <div class="osm-credit">Address data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style="color:inherit">OpenStreetMap</a> contributors</div>
     </div>
-    ${saved ? `<button class="btn btn-outline btn-sm" style="margin-bottom:12px;width:100%;color:var(--danger);border-color:var(--danger)" onclick="clearLocation('${type}')">Clear saved location</button>` : ''}
-    <button class="btn btn-gold" id="loc-save-btn" onclick="saveLocation('${type}')" ${saved ? '' : 'disabled'}>Save Location</button>`;
-  if (saved) {
-    const d = JSON.parse(saved);
-    _locEditCoords = { lat: d.lat, lon: d.lon };
-  }
+    ${hasSaved ? `<button class="btn btn-outline btn-sm" style="margin-bottom:12px;width:100%;color:var(--danger);border-color:var(--danger)" onclick="clearLocation('${type}')">Clear saved location</button>` : ''}
+    <button class="btn btn-gold" id="loc-save-btn" onclick="saveLocation('${type}')" ${hasSaved ? '' : 'disabled'}>Save Location</button>`;
   openOv('ov-set');
 }
 function locEditSearch(q) {
+  _locEditCoords = null;
+  const btn = document.getElementById('loc-save-btn');
+  if (btn) btn.disabled = true;
   clearTimeout(_locDebounce.edit);
   const sugg = document.getElementById('loc-edit-sugg');
   if (!q || q.length < 3) { if (sugg) sugg.classList.add('hidden'); return; }
@@ -2866,20 +2876,23 @@ function selectSugg(field, idx) {
 }
 function closeSugg(field) {
   setTimeout(() => {
-    const sugg = document.getElementById('sugg-'+field);
+    const id = field === 'edit' ? 'loc-edit-sugg' : 'sugg-' + field;
+    const sugg = document.getElementById(id);
     if (sugg) sugg.classList.add('hidden');
-  }, 200);
+  }, 300);
 }
 function setLocPreset(field, type) {
   const saved = localStorage.getItem('loc_'+type);
   if (!saved) { toast('Set your ' + (type==='home'?'Home':'Work') + ' location in Settings first','err'); return; }
-  const d = JSON.parse(saved);
-  locCoords[field] = { lat: d.lat, lon: d.lon };
-  const input = document.getElementById('f-'+field);
-  if (input) input.value = d.label;
-  const sugg = document.getElementById('sugg-'+field);
-  if (sugg) sugg.classList.add('hidden');
-  tryAutoCalcDist();
+  try {
+    const d = JSON.parse(saved);
+    locCoords[field] = { lat: d.lat, lon: d.lon };
+    const input = document.getElementById('f-'+field);
+    if (input) input.value = d.label;
+    const sugg = document.getElementById('sugg-'+field);
+    if (sugg) sugg.classList.add('hidden');
+    tryAutoCalcDist();
+  } catch { localStorage.removeItem('loc_'+type); toast('Saved location was corrupted — please re-set it in Settings','err'); }
 }
 async function tryAutoCalcDist() {
   if (!locCoords.start || !locCoords.end) return;
