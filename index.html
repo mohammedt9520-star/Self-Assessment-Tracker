@@ -1474,6 +1474,7 @@ function jumpHistory(cat) { hFilter = cat; hYear = dashYear; showScreen('history
 ═══════════════════════════════════════════════ */
 function setHF(f, btn) {
   hFilter = f;
+  if (f === 'all') hYear = null;
   document.querySelectorAll('.fc[data-f]').forEach(c => c.classList.remove('on'));
   btn.classList.add('on');
   renderHistory();
