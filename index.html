@@ -2506,6 +2506,10 @@ function prefillForm(e) {
   const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
   if (e.category === 'mileage') {
     set('f-purpose', e.description || '');
+    // Highlight the matching purpose pill if one exists
+    document.querySelectorAll('.p-btn').forEach(b => {
+      if (b.textContent.trim() === (e.description || '').trim()) b.classList.add('on');
+    });
     set('f-start',   e.start_location || '');
     set('f-end',     e.end_location || '');
     set('f-miles',   e.miles || '');
@@ -3025,7 +3029,7 @@ async function submitForm(cat) {
     console.error('submitForm error:', err);
     toast('Error: ' + (err.message || 'Unknown'), 'err');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+    if (btn) { btn.disabled = false; btn.textContent = editingId ? 'Update Entry' : 'Save'; }
   }
 }
 
