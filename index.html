@@ -2593,50 +2593,63 @@ function fillAddr(field, type) {
   if (el && addr) el.value = addr;
 }
 
+function extractPostcode(s) {
+  const m = s.match(/\b([A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2})\b/i);
+  return m ? m[1].replace(/\s+/,'').toUpperCase() : null;
+}
+function haversineMiles(lat1, lon1, lat2, lon2) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+async function geocodeAddr(addr) {
+  const pc = extractPostcode(addr);
+  if (pc) {
+    const r = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+    const d = await r.json();
+    if (d.status === 200) return { lat: d.result.latitude, lon: d.result.longitude };
+  }
+  // Fallback: Nominatim for place names without postcodes (add postcode for instant results)
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), 8000);
+  const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&limit=1&countrycodes=gb`, {
+    headers: { 'Accept-Language': 'en-GB' }, signal: ctrl.signal
+  });
+  const data = await r.json();
+  if (!data.length) throw new Error(`Not found: "${addr}" — try adding a postcode`);
+  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+}
 async function calcDist() {
   const from = (document.getElementById('f-start')?.value || '').trim();
   const to   = (document.getElementById('f-end')?.value   || '').trim();
-  if (!from || !to) { toast('Enter both From and To addresses first', 'err'); return; }
+  if (!from || !to) { toast('Enter both From and To first', 'err'); return; }
 
   const resEl = document.getElementById('dist-res');
   resEl.classList.remove('hidden');
-  resEl.innerHTML = '<div class="dist-calculating">📍 Calculating route…</div>';
+  const hasFromPc = !!extractPostcode(from), hasToPc = !!extractPostcode(to);
+  resEl.innerHTML = `<div class="dist-calculating">📍 ${hasFromPc && hasToPc ? 'Looking up postcodes…' : 'Looking up addresses…'}</div>`;
 
   try {
-    const geocode = async (q) => {
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&countrycodes=gb`;
-      const r = await fetch(url, { headers: { 'Accept-Language': 'en-GB' } });
-      if (!r.ok) throw new Error('Geocoding service unavailable');
-      const data = await r.json();
-      if (!data.length) throw new Error(`Address not found: "${q}"`);
-      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
-    };
-
-    const [A, B] = await Promise.all([geocode(from), geocode(to)]);
-
-    const routeUrl = `https://router.project-osrm.org/route/v1/driving/${A.lon},${A.lat};${B.lon},${B.lat}?overview=false`;
-    const rr = await fetch(routeUrl);
-    if (!rr.ok) throw new Error('Routing service unavailable');
-    const rd = await rr.json();
-    if (rd.code !== 'Ok' || !rd.routes?.length) throw new Error('Could not calculate a driving route between those addresses');
-
-    const metres = rd.routes[0].distance;
-    const miles  = Math.round((metres / 1609.344) * 10) / 10;
-    const claim  = (miles * CFG.rate).toFixed(2);
+    const [A, B] = await Promise.all([geocodeAddr(from), geocodeAddr(to)]);
+    const straight = haversineMiles(A.lat, A.lon, B.lat, B.lon);
+    const miles = Math.round(straight * 1.3 * 10) / 10;
+    const claim = (miles * CFG.rate).toFixed(2);
 
     resEl.innerHTML = `<div class="dist-card">
-      <div><div class="d-lbl">Driving distance</div><div class="d-miles">${miles} mi</div></div>
+      <div><div class="d-lbl">Est. driving</div><div class="d-miles">${miles} mi</div></div>
       <div><div class="d-lbl">Claim @ ${Math.round(CFG.rate*100)}p/mi</div><div class="d-claim">£${claim}</div></div>
-    </div>`;
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;padding:0 2px">Estimate (straight-line × 1.3) — adjust miles below if needed</div>`;
 
     const milesEl = document.getElementById('f-miles');
     if (milesEl) { milesEl.value = miles; calcClaim(); }
-
     const retMiles = document.getElementById('return-miles');
     if (retMiles && returnJourneyOn && !retMiles.value) { retMiles.value = miles; updateReturnClaim(); }
-
   } catch (err) {
-    resEl.innerHTML = `<div class="dist-err">⚠ ${esc(err.message)}</div>`;
+    const hint = (!hasFromPc || !hasToPc) ? ' — include postcode for instant results' : '';
+    resEl.innerHTML = `<div class="dist-err">⚠ ${esc(err.message)}${hint}</div>`;
   }
 }
 
