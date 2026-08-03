@@ -1198,8 +1198,8 @@ function esc(s) {
    CONFIG
 ═══════════════════════════════════════════════ */
 const CFG = {
-  sbUrl:  'YOUR_SUPABASE_URL',
-  sbKey:  'YOUR_SUPABASE_ANON_KEY',
+  sbUrl:  'https://uiyonwhqbidbaubjbyqk.supabase.co',
+  sbKey:  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpeW9ud2hxYmlkYmF1YmpieXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODgyOTIsImV4cCI6MjA5Nzk2NDI5Mn0.IQdcuExcZxREewtSzA4pndBocWyTkJk4FjiAd461p8A',
   rate:   0.45,
 };
 
@@ -1212,7 +1212,7 @@ let _db = null, me = null, expenses = [], hFilter = 'all', dashYear = null;
    SUPABASE
 ═══════════════════════════════════════════════ */
 function initDb() {
-  if (CFG.sbUrl === 'YOUR_SUPABASE_URL') return false;
+  if (CFG.sbUrl === 'https://uiyonwhqbidbaubjbyqk.supabase.co') return false;
   _db = window.supabase.createClient(CFG.sbUrl, CFG.sbKey);
   return true;
 }
@@ -1265,7 +1265,7 @@ function showSetup() {
   const sub = document.querySelector('.auth-brand-sub');
   if (sub) sub.textContent = 'Open index.html and add your Supabase URL and key, then reload.';
   const panel = document.querySelector('.auth-panel');
-  if (panel) panel.innerHTML = '<h2>Not Configured</h2><p style="color:var(--text-muted);font-size:14px;line-height:1.6;margin-bottom:16px">Open <strong>index.html</strong>, find the CFG block near the top of the script, and replace <code>YOUR_SUPABASE_URL</code> and <code>YOUR_SUPABASE_ANON_KEY</code> with your credentials from the Supabase dashboard.</p><p style="font-size:13px;color:var(--text-muted)">Then redeploy to Cloudflare Pages and reload.</p>';
+  if (panel) panel.innerHTML = '<h2>Not Configured</h2><p style="color:var(--text-muted);font-size:14px;line-height:1.6;margin-bottom:16px">Open <strong>index.html</strong>, find the CFG block near the top of the script, and replace <code>https://uiyonwhqbidbaubjbyqk.supabase.co</code> and <code>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpeW9ud2hxYmlkYmF1YmpieXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODgyOTIsImV4cCI6MjA5Nzk2NDI5Mn0.IQdcuExcZxREewtSzA4pndBocWyTkJk4FjiAd461p8A</code> with your credentials from the Supabase dashboard.</p><p style="font-size:13px;color:var(--text-muted)">Then redeploy to Cloudflare Pages and reload.</p>';
 }
 
 async function boot() {
