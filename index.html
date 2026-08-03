@@ -694,6 +694,17 @@ input, select, textarea { font-family: inherit; }
 }
 .p-btn.on { background: var(--grove); border-color: var(--grove); color: var(--white); }
 
+/* Address quick-fill shortcuts */
+.addr-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; min-height: 0; }
+.addr-shortcuts:empty { display: none; }
+.addr-btn {
+  padding: 6px 12px; border-radius: var(--r-pill);
+  font-size: 12px; font-weight: 600;
+  background: var(--alabaster); border: 1.5px solid var(--linen);
+  color: var(--grove); cursor: pointer; transition: all 0.15s;
+}
+.addr-btn:active { background: var(--grove); color: var(--white); border-color: var(--grove); }
+
 /* Distance result card */
 .dist-card {
   background: linear-gradient(135deg, var(--forest-mid) 0%, var(--forest-rich) 100%);
@@ -704,6 +715,8 @@ input, select, textarea { font-family: inherit; }
 .dist-card .d-lbl { font-size: 11px; color: var(--mist); }
 .dist-card .d-miles { font-family: var(--font-serif); font-size: 26px; color: var(--gold-light); }
 .dist-card .d-claim { font-size: 22px; font-weight: 700; color: var(--gold); }
+.dist-calculating { padding: 10px 0; color: var(--text-muted); font-size: 14px; }
+.dist-err { padding: 10px 0; color: #c0392b; font-size: 13px; }
 
 /* ── Buttons ── */
 .btn {
@@ -1022,6 +1035,20 @@ input, select, textarea { font-family: inherit; }
       <div class="set-wrap">
 
         <div class="set-group">
+          <div class="set-group-label">Saved Locations</div>
+          <div class="set-card">
+            <div class="set-row" onclick="editAddress('home')">
+              <span class="sr-label">🏠 Home Address</span>
+              <span class="sr-value" id="disp-home" style="max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Not set <svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></span>
+            </div>
+            <div class="set-row" onclick="editAddress('work')">
+              <span class="sr-label">🕌 Work / Mosque</span>
+              <span class="sr-value" id="disp-work" style="max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Not set <svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="set-group">
           <div class="set-group-label">Mileage</div>
           <div class="set-card">
             <div class="set-row" onclick="editRate()">
@@ -1199,6 +1226,8 @@ const CFG = {
   sbUrl: 'https://uiyonwhqbidbaubjbyqk.supabase.co',
   sbKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpeW9ud2hxYmlkYmF1YmpieXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODgyOTIsImV4cCI6MjA5Nzk2NDI5Mn0.IQdcuExcZxREewtSzA4pndBocWyTkJk4FjiAd461p8A',
   rate:  0.45,
+  homeAddress: '',
+  workAddress: '',
 };
 
 /* ═══════════════════════════════════════════════
@@ -1269,6 +1298,7 @@ function showSetup() {
 async function boot() {
   const hasDb = initDb();
   loadRate();
+  loadAddresses();
   if (!hasDb) {
     // No demo mode in production - Supabase required
     showSetup();
@@ -2432,8 +2462,16 @@ function buildForm(cat) {
       <div class="pills">${['Hospital Visit','Bereavement Visit','Funeral','Janazah','Home Visit','Pastoral Care','Meeting','Teaching','Madrasa','Class Admin','Training','Community Visit','Other'].map(p=>`<button class="p-btn" onclick="setPill(this,'f-purpose','${p}')">${p}</button>`).join('')}</div>
       <input type="text" id="f-purpose" placeholder="or type your own…">
     </div>
-    <div class="field"><label>From</label><input type="text" id="f-start" placeholder="e.g. Mosque, Birmingham B12"></div>
-    <div class="field"><label>To</label><input type="text" id="f-end" placeholder="e.g. City Hospital, Birmingham"></div>
+    <div class="field">
+      <label>From</label>
+      <div class="addr-shortcuts">${CFG.homeAddress?`<button type="button" class="addr-btn" onclick="fillAddr('f-start','home')">🏠 Home</button>`:''} ${CFG.workAddress?`<button type="button" class="addr-btn" onclick="fillAddr('f-start','work')">🕌 Work</button>`:''}</div>
+      <input type="text" id="f-start" placeholder="e.g. Mosque, Birmingham B12">
+    </div>
+    <div class="field">
+      <label>To</label>
+      <div class="addr-shortcuts">${CFG.homeAddress?`<button type="button" class="addr-btn" onclick="fillAddr('f-end','home')">🏠 Home</button>`:''} ${CFG.workAddress?`<button type="button" class="addr-btn" onclick="fillAddr('f-end','work')">🕌 Work</button>`:''}</div>
+      <input type="text" id="f-end" placeholder="e.g. City Hospital, Birmingham">
+    </div>
     <button class="btn btn-outline btn-sm mt-8" style="width:100%;margin-bottom:12px" onclick="calcDist()">📍 Calculate Distance</button>
     <div id="dist-res" class="hidden"></div>
     <div class="field-row">
@@ -2549,8 +2587,57 @@ function calcClaim() {
   const el = document.getElementById('f-claim');
   if (el) el.value = (miles*rate).toFixed(2);
 }
-function calcDist() {
-  toast('Use Google Maps to check the distance, then enter miles below','err');
+function fillAddr(field, type) {
+  const addr = type === 'home' ? CFG.homeAddress : CFG.workAddress;
+  const el = document.getElementById(field);
+  if (el && addr) el.value = addr;
+}
+
+async function calcDist() {
+  const from = (document.getElementById('f-start')?.value || '').trim();
+  const to   = (document.getElementById('f-end')?.value   || '').trim();
+  if (!from || !to) { toast('Enter both From and To addresses first', 'err'); return; }
+
+  const resEl = document.getElementById('dist-res');
+  resEl.classList.remove('hidden');
+  resEl.innerHTML = '<div class="dist-calculating">📍 Calculating route…</div>';
+
+  try {
+    const geocode = async (q) => {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&countrycodes=gb`;
+      const r = await fetch(url, { headers: { 'Accept-Language': 'en-GB' } });
+      if (!r.ok) throw new Error('Geocoding service unavailable');
+      const data = await r.json();
+      if (!data.length) throw new Error(`Address not found: "${q}"`);
+      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+    };
+
+    const [A, B] = await Promise.all([geocode(from), geocode(to)]);
+
+    const routeUrl = `https://router.project-osrm.org/route/v1/driving/${A.lon},${A.lat};${B.lon},${B.lat}?overview=false`;
+    const rr = await fetch(routeUrl);
+    if (!rr.ok) throw new Error('Routing service unavailable');
+    const rd = await rr.json();
+    if (rd.code !== 'Ok' || !rd.routes?.length) throw new Error('Could not calculate a driving route between those addresses');
+
+    const metres = rd.routes[0].distance;
+    const miles  = Math.round((metres / 1609.344) * 10) / 10;
+    const claim  = (miles * CFG.rate).toFixed(2);
+
+    resEl.innerHTML = `<div class="dist-card">
+      <div><div class="d-lbl">Driving distance</div><div class="d-miles">${miles} mi</div></div>
+      <div><div class="d-lbl">Claim @ ${Math.round(CFG.rate*100)}p/mi</div><div class="d-claim">£${claim}</div></div>
+    </div>`;
+
+    const milesEl = document.getElementById('f-miles');
+    if (milesEl) { milesEl.value = miles; calcClaim(); }
+
+    const retMiles = document.getElementById('return-miles');
+    if (retMiles && returnJourneyOn && !retMiles.value) { retMiles.value = miles; updateReturnClaim(); }
+
+  } catch (err) {
+    resEl.innerHTML = `<div class="dist-err">⚠ ${esc(err.message)}</div>`;
+  }
 }
 
 
@@ -2659,8 +2746,9 @@ function toggleReturn() {
 function setReturnDest(btn, type) {
   document.querySelectorAll('#return-detail .pb').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
-  const name = me?.user_metadata?.full_name || 'Home';
-  const dest = type === 'home' ? 'Home' : 'Mosque / Work';
+  const dest = type === 'home'
+    ? (CFG.homeAddress || 'Home')
+    : (CFG.workAddress || 'Mosque / Work');
   const el = document.getElementById('return-dest');
   if (el) el.value = dest;
   updateSaveSummary();
@@ -2813,6 +2901,10 @@ function loadRate() {
   const s = localStorage.getItem('mileageRate');
   if (s) CFG.rate = parseFloat(s);
 }
+function loadAddresses() {
+  CFG.homeAddress = localStorage.getItem('homeAddress') || '';
+  CFG.workAddress = localStorage.getItem('workAddress') || '';
+}
 function loadSettingsDisplay() {
   const el = document.getElementById('rate-disp');
   if (el) el.innerHTML = `${Math.round(CFG.rate*100)}p <svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
@@ -2820,6 +2912,11 @@ function loadSettingsDisplay() {
   if (en) en.innerHTML = `${me?.user_metadata?.full_name||'–'} <svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
   const ee = document.getElementById('disp-email');
   if (ee) ee.textContent = me?.email||'–';
+  const chev = `<svg class="sr-chev" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
+  const eh = document.getElementById('disp-home');
+  if (eh) eh.innerHTML = `${CFG.homeAddress || 'Not set'} ${chev}`;
+  const ew = document.getElementById('disp-work');
+  if (ew) ew.innerHTML = `${CFG.workAddress || 'Not set'} ${chev}`;
 }
 function editRate() {
   document.getElementById('set-title').textContent = 'Mileage Rate';
@@ -2855,6 +2952,28 @@ async function saveName() {
   if (_db) { const { error } = await _db.auth.updateUser({ data:{ full_name:n } }); if (error) { toast(error.message,'err'); return; } }
   if (me) me.user_metadata = {...me.user_metadata, full_name:n};
   loadSettingsDisplay(); refreshDash(); closeOv('ov-set'); toast('Name updated');
+}
+function editAddress(type) {
+  const isHome = type === 'home';
+  const current = isHome ? CFG.homeAddress : CFG.workAddress;
+  const label = isHome ? 'Home Address' : 'Work / Mosque Address';
+  document.getElementById('set-title').textContent = label;
+  document.getElementById('set-body').innerHTML = `
+    <div class="field">
+      <label>${label}</label>
+      <input type="text" id="ea" value="${esc(current)}" placeholder="e.g. 123 Main Street, Birmingham B1 1AA" autocomplete="street-address">
+      <div class="hint">Used to auto-fill From / To in mileage entries and to calculate distances.</div>
+    </div>
+    <button class="btn btn-gold mt-8" onclick="saveAddress('${type}')">Save</button>`;
+  openOv('ov-set');
+}
+function saveAddress(type) {
+  const val = (document.getElementById('ea')?.value || '').trim();
+  if (type === 'home') { CFG.homeAddress = val; localStorage.setItem('homeAddress', val); }
+  else                 { CFG.workAddress = val; localStorage.setItem('workAddress', val); }
+  loadSettingsDisplay();
+  closeOv('ov-set');
+  toast(`${type === 'home' ? 'Home' : 'Work'} address saved`);
 }
 
 /* ═══════════════════════════════════════════════
