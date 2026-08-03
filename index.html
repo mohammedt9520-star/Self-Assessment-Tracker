@@ -975,6 +975,7 @@ input, select, textarea { font-family: inherit; }
     </div>
     <div class="filter-scroll" id="h-filters">
       <button class="fc on" data-f="all" onclick="setHF('all',this)">All</button>
+      <button class="fc hidden" id="h-yr-chip" onclick="clearHYear()"></button>
       <button class="fc" data-f="mileage"    onclick="setHF('mileage',this)">🚗 Mileage</button>
       <button class="fc" data-f="parking"    onclick="setHF('parking',this)">🅿️ Parking</button>
       <button class="fc" data-f="books"      onclick="setHF('books',this)">📚 Books</button>
@@ -1081,7 +1082,7 @@ input, select, textarea { font-family: inherit; }
         </div>
         Dashboard
       </button>
-      <button class="ni" id="ni-1" onclick="showScreen('history',1)">
+      <button class="ni" id="ni-1" onclick="hYear=null;showScreen('history',1)">
         <div class="ni-icon">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         </div>
@@ -1206,7 +1207,7 @@ const CFG = {
 /* ═══════════════════════════════════════════════
    STATE
 ═══════════════════════════════════════════════ */
-let _db = null, me = null, expenses = [], hFilter = 'all', dashYear = null;
+let _db = null, me = null, expenses = [], hFilter = 'all', hYear = null, dashYear = null;
 
 /* ═══════════════════════════════════════════════
    SUPABASE
@@ -1471,27 +1472,47 @@ function refreshDash() {
 }
 
 function setDashYear(y) { dashYear = y; refreshDash(); }
-function jumpHistory(cat) { hFilter = cat; showScreen('history',1); }
+function jumpHistory(cat) { hFilter = cat; hYear = dashYear; showScreen('history',1); }
 
 /* ═══════════════════════════════════════════════
    HISTORY — grouped by tax year → date
 ═══════════════════════════════════════════════ */
 function setHF(f, btn) {
   hFilter = f;
-  document.querySelectorAll('.fc').forEach(c => c.classList.remove('on'));
+  document.querySelectorAll('.fc[data-f]').forEach(c => c.classList.remove('on'));
   btn.classList.add('on');
+  renderHistory();
+}
+function clearHYear() {
+  hYear = null;
   renderHistory();
 }
 function renderHistory() {
   const q = (document.getElementById('h-search')?.value || '').toLowerCase();
   const filtered = expenses.filter(e => {
     if (hFilter !== 'all' && e.category !== hFilter) return false;
+    if (hYear && e.tax_year !== hYear) return false;
     if (q && !e.description?.toLowerCase().includes(q) && !e.category?.toLowerCase().includes(q) && !(e.notes||'').toLowerCase().includes(q)) return false;
     return true;
   });
 
+  // Year chip
+  const yrChip = document.getElementById('h-yr-chip');
+  if (yrChip) {
+    if (hYear) {
+      yrChip.textContent = `📅 ${taxYearShort(hYear)} ✕`;
+      yrChip.classList.remove('hidden');
+      yrChip.classList.add('on');
+    } else {
+      yrChip.classList.add('hidden');
+      yrChip.classList.remove('on');
+    }
+  }
+
   document.getElementById('hist-subtitle').textContent =
-    hFilter === 'all' ? `${filtered.length} records across all years` : `${catLabel(hFilter)} · ${filtered.length} records`;
+    hFilter === 'all'
+      ? `${countPart}${hYear ? ' · ' + taxYearShort(hYear) : ' across all years'}`
+      : `${catLabel(hFilter)} · ${taxYearShort(hYear) || 'all years'} · ${filtered.length} records`;
 
   const el = document.getElementById('h-list');
   if (!filtered.length) {
