@@ -986,6 +986,8 @@ input, select, textarea { font-family: inherit; }
       <button class="fc" data-f="home"       onclick="setHF('home',this)">🏠 Home</button>
       <button class="fc" data-f="equipment"  onclick="setHF('equipment',this)">🔧 Equipment</button>
       <button class="fc" data-f="training"   onclick="setHF('training',this)">🎓 Training</button>
+      <button class="fc" data-f="stationery" onclick="setHF('stationery',this)">✏️ Stationery</button>
+      <button class="fc" data-f="postage"    onclick="setHF('postage',this)">📬 Postage</button>
       <button class="fc" data-f="other"      onclick="setHF('other',this)">📦 Other</button>
     </div>
     <div class="scroll-body" id="h-list"></div>
@@ -1083,7 +1085,7 @@ input, select, textarea { font-family: inherit; }
         </div>
         Dashboard
       </button>
-      <button class="ni" id="ni-1" onclick="hYear=null;showScreen('history',1)">
+      <button class="ni" id="ni-1" onclick="hYear=null;hFilter='all';showScreen('history',1)">
         <div class="ni-icon">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         </div>
@@ -1436,15 +1438,18 @@ function refreshDash() {
 
   // Category cards
   const CATS = [
-    { id:'mileage', label:'Mileage',    lbl:'journeys' },
-    { id:'parking', label:'Parking',    lbl:'receipts' },
-    { id:'books',   label:'Books',      lbl:'books' },
-    { id:'software',label:'Software',   lbl:'subscriptions' },
-    { id:'phone',   label:'Phone',      lbl:'entries' },
-    { id:'home',    label:'Home Office',lbl:'entries' },
-    { id:'equipment',label:'Equipment', lbl:'items' },
-    { id:'training',label:'Training',   lbl:'courses' },
-    { id:'other',   label:'Other',      lbl:'entries' },
+    { id:'mileage',    label:'Mileage',     lbl:'journeys' },
+    { id:'parking',    label:'Parking',     lbl:'receipts' },
+    { id:'books',      label:'Books',       lbl:'books' },
+    { id:'software',   label:'Software',    lbl:'subscriptions' },
+    { id:'phone',      label:'Phone',       lbl:'entries' },
+    { id:'internet',   label:'Internet',    lbl:'entries' },
+    { id:'home',       label:'Home Office', lbl:'entries' },
+    { id:'equipment',  label:'Equipment',   lbl:'items' },
+    { id:'training',   label:'Training',    lbl:'courses' },
+    { id:'stationery', label:'Stationery',  lbl:'items' },
+    { id:'postage',    label:'Postage',     lbl:'items' },
+    { id:'other',      label:'Other',       lbl:'entries' },
   ];
   if (elCats) elCats.innerHTML = CATS.map(c => {
     const items = yr.filter(e => e.category === c.id);
@@ -1505,10 +1510,15 @@ function renderHistory() {
     }
   }
 
+  // Sync category chip active state (also fixes chip after jumpHistory)
+  document.querySelectorAll('.fc[data-f]').forEach(c => {
+    c.classList.toggle('on', c.dataset.f === hFilter);
+  });
+
   document.getElementById('hist-subtitle').textContent =
     hFilter === 'all'
-      ? `${countPart}${hYear ? ' · ' + taxYearShort(hYear) : ' across all years'}`
-      : `${catLabel(hFilter)} · ${taxYearShort(hYear) || 'all years'} · ${filtered.length} records`;
+      ? `${filtered.length} records${hYear ? ' · ' + taxYearShort(hYear) : ' across all years'}`
+      : `${catLabel(hFilter)} · ${hYear ? taxYearShort(hYear) : 'all years'} · ${filtered.length} records`;
 
   const el = document.getElementById('h-list');
   if (!filtered.length) {
@@ -1615,8 +1625,10 @@ function renderAnalytics() {
 
   const monthly = Array(12).fill(0);
   yr.forEach(e => { monthly[new Date(e.date+'T12:00:00').getMonth()] += e.amount||0; });
-  const maxMo = Math.max(...monthly) || 1;
-  const MOS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const MO_LABELS = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+  const MO_IDXS   = [3,4,5,6,7,8,9,10,11,0,1,2];
+  const tyMonthly = MO_IDXS.map(i => monthly[i]);
+  const maxMo = Math.max(...tyMonthly) || 1;
 
   // Year comparison
   const yrComp = years.map(y => ({ y, total: expenses.filter(e=>e.tax_year===y).reduce((s,e)=>s+(e.amount||0),0) }));
@@ -1643,12 +1655,12 @@ function renderAnalytics() {
 
     <div class="an-card">
       <div class="an-title">Monthly Spend · ${taxYearShort(anYear)}</div>
-      ${MOS.map((m,i)=>`
+      ${MO_LABELS.map((m,i)=>`
         <div class="bc-row">
           <div class="bc-label">${m}</div>
           <div class="bc-track">
-            <div class="bc-fill" style="width:${Math.max(monthly[i]>0?3:0,Math.round(monthly[i]/maxMo*100))}%;background:var(--grove)">
-              ${monthly[i]>0?`<span class="bc-val">${fmt(monthly[i])}</span>`:''}
+            <div class="bc-fill" style="width:${Math.max(tyMonthly[i]>0?3:0,Math.round(tyMonthly[i]/maxMo*100))}%;background:var(--grove)">
+              ${tyMonthly[i]>0?`<span class="bc-val">${fmt(tyMonthly[i])}</span>`:''}
             </div>
           </div>
         </div>`).join('')}
@@ -2391,6 +2403,7 @@ function dlFile(content, name, type) {
 function openCatPicker() { openOv('ov-cat'); }
 function openForm(cat) {
   closeOv('ov-cat');
+  returnJourneyOn = false;
   document.getElementById('form-title').textContent = 'Add '+catLabel(cat);
   document.getElementById('form-body').innerHTML = buildForm(cat);
   openOv('ov-form');
@@ -2525,15 +2538,6 @@ function buildForm(cat) {
     <button class="btn btn-gold" id="submit-btn" onclick="submitForm('${cat}')">Save Expense</button>`;
 }
 
-function showTaxYearHint() {
-  const d = document.getElementById('f-date')?.value;
-  const el = document.getElementById('ty-hint');
-  if (d && el) {
-    const ty = taxYear(new Date(d + 'T12:00:00'));
-    el.textContent = `Tax year: ${taxYearLabel(ty)}`;
-    el.style.color = isCurrentYear(ty) ? 'var(--grove)' : 'var(--gold)';
-  }
-}
 function setPill(btn, field, val) {
   btn.closest('.field').querySelectorAll('.p-btn').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
@@ -2545,21 +2549,8 @@ function calcClaim() {
   const el = document.getElementById('f-claim');
   if (el) el.value = (miles*rate).toFixed(2);
 }
-async function calcDist() {
-  const start = document.getElementById('f-start')?.value?.trim();
-  const end   = document.getElementById('f-end')?.value?.trim();
-  if (!start||!end) { toast('Enter both locations','err'); return; }
-  const mi = (5 + Math.random()*38).toFixed(1);
-  const cl = (mi * CFG.rate).toFixed(2);
-  document.getElementById('f-miles').value = mi;
-  document.getElementById('f-claim').value = cl;
-  const el = document.getElementById('dist-res');
-  el.classList.remove('hidden');
-  el.innerHTML = `<div class="dist-card">
-    <div><div class="d-lbl">Distance</div><div class="d-miles">${mi} miles</div></div>
-    <div style="text-align:right"><div class="d-lbl">Claim Value</div><div class="d-claim">£${cl}</div></div>
-  </div>`;
-  toast('Distance calculated');
+function calcDist() {
+  toast('Use Google Maps to check the distance, then enter miles below','err');
 }
 
 
@@ -2854,7 +2845,7 @@ function editName() {
   const name = me?.user_metadata?.full_name||'';
   document.getElementById('set-title').textContent = 'Your Name';
   document.getElementById('set-body').innerHTML = `
-    <div class="field"><label>Full Name</label><input type="text" id="en" value="${name}" placeholder="Imam Abdullah"></div>
+    <div class="field"><label>Full Name</label><input type="text" id="en" value="${esc(name)}" placeholder="Imam Abdullah"></div>
     <button class="btn btn-gold" onclick="saveName()">Save</button>`;
   openOv('ov-set');
 }
