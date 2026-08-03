@@ -772,6 +772,29 @@ input, select, textarea { font-family: inherit; }
 #toast.on { transform: translateX(-50%) translateY(0); }
 #toast.err { background: var(--danger); color: white; border-color: transparent; }
 
+/* ── Update Banner ── */
+#update-banner {
+  position: fixed;
+  bottom: calc(var(--nav-h) + var(--sab) + 10px);
+  left: 12px; right: 12px;
+  background: linear-gradient(135deg, #1a3d28 0%, #0f2318 100%);
+  border: 1px solid rgba(200,168,75,0.35);
+  border-radius: 14px;
+  padding: 11px 12px 11px 14px;
+  display: flex; align-items: center; gap: 12px;
+  box-shadow: 0 6px 28px rgba(15,35,24,0.5), 0 1px 0 rgba(200,168,75,0.15) inset;
+  z-index: 1100;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.32,1.1,0.6,1);
+}
+#update-banner.on {
+  pointer-events: auto;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 /* ── Empty ── */
 .empty {
   display: flex; flex-direction: column; align-items: center;
@@ -911,6 +934,22 @@ input, select, textarea { font-family: inherit; }
 
 <!-- TOAST -->
 <div id="toast"><span id="t-msg">Saved</span></div>
+
+<!-- UPDATE BANNER -->
+<div id="update-banner" role="alert" aria-live="polite">
+  <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+    <div style="width:32px;height:32px;border-radius:50%;background:rgba(200,168,75,0.18);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#c8a84b" stroke-width="2.2"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M4.07 15A9 9 0 1 0 6.5 6.5L4 9"/></svg>
+    </div>
+    <div style="min-width:0">
+      <div style="font-size:13px;font-weight:700;color:var(--ivory);white-space:nowrap">App updated</div>
+      <div style="font-size:11px;color:var(--mist);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Refresh to get the latest version</div>
+    </div>
+  </div>
+  <button onclick="doAppRefresh()" style="flex-shrink:0;padding:8px 16px;border-radius:var(--r-pill);background:linear-gradient(135deg,var(--gold) 0%,var(--gold-warm) 100%);color:var(--ink);font-size:13px;font-weight:700;border:none;cursor:pointer;white-space:nowrap;box-shadow:0 2px 8px rgba(200,168,75,0.35)">
+    Refresh
+  </button>
+</div>
 
 <!-- ══════════════ AUTH ══════════════ -->
 <div id="auth-wrap">
@@ -3035,10 +3074,38 @@ const catIcon  = c => ICONS[c]  || '📦';
 const catLabel = c => LABELS[c] || 'Other';
 
 /* ═══════════════════════════════════════════════
-   SERVICE WORKER
+   SERVICE WORKER + UPDATE BANNER
 ═══════════════════════════════════════════════ */
+function showUpdateBanner() {
+  document.getElementById('update-banner')?.classList.add('on');
+}
+function doAppRefresh() {
+  window.location.reload();
+}
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then(reg => {
+      // If a new SW is already waiting when page loads (e.g. tab was in background)
+      if (reg.waiting) showUpdateBanner();
+
+      // New SW found while page is open
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdateBanner();
+          }
+        });
+      });
+    }).catch(() => {});
+
+    // SW took control after skipWaiting (catches cases the above misses)
+    let hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController) showUpdateBanner();
+      hadController = true;
+    });
+  });
 }
 
 /* URL shortcuts */
