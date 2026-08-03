@@ -1408,7 +1408,7 @@ function refreshDash() {
 
   // Tax year tabs
   const tabs = document.getElementById('dash-ty-tabs');
-  tabs.innerHTML = years.map(y => `
+  if (tabs) tabs.innerHTML = years.map(y => `
     <button class="ty-tab${y===dashYear?' active':''}" onclick="setDashYear('${y}')">
       ${taxYearShort(y)}${isCurrentYear(y)?'  ●':''}
     </button>`).join('');
@@ -1418,13 +1418,21 @@ function refreshDash() {
   const total = yr.reduce((s,e) => s+(e.amount||0), 0);
   const totalMiles = yr.filter(e=>e.category==='mileage').reduce((s,e)=>s+(e.miles||0),0);
 
-  document.getElementById('dash-year-label').textContent = isCurrentYear(dashYear) ? 'Current Tax Year' : taxYearLabel(dashYear);
-  document.getElementById('dash-total').textContent = fmtK(total);
-  document.getElementById('dash-count').textContent = yr.length;
-  document.getElementById('dash-greeting').textContent = greeting();
+  const elYrLbl  = document.getElementById('dash-year-label');
+  const elTotal  = document.getElementById('dash-total');
+  const elCount  = document.getElementById('dash-count');
+  const elGreet  = document.getElementById('dash-greeting');
+  const elPills  = document.getElementById('dash-pills');
+  const elCats   = document.getElementById('dash-cat-grid');
+  const elRecent = document.getElementById('dash-recent');
+
+  if (elYrLbl)  elYrLbl.textContent  = isCurrentYear(dashYear) ? 'Current Tax Year' : taxYearLabel(dashYear);
+  if (elTotal)  elTotal.textContent  = fmtK(total);
+  if (elCount)  elCount.textContent  = yr.length;
+  if (elGreet)  elGreet.textContent  = greeting();
 
   // Hero pills
-  document.getElementById('dash-pills').innerHTML = [
+  if (elPills) elPills.innerHTML = [
     totalMiles > 0 ? `<div class="hp-pill">🚗 <strong>${totalMiles.toFixed(0)} mi</strong></div>` : '',
     `<div class="hp-pill">📅 <strong>${taxYearShort(dashYear)}</strong></div>`,
     yr.filter(e=>e.category==='mileage').length > 0 ? `<div class="hp-pill">⛽ <strong>${yr.filter(e=>e.category==='mileage').length} journeys</strong></div>` : '',
@@ -1442,7 +1450,7 @@ function refreshDash() {
     { id:'training',label:'Training',   lbl:'courses' },
     { id:'other',   label:'Other',      lbl:'entries' },
   ];
-  document.getElementById('dash-cat-grid').innerHTML = CATS.map(c => {
+  if (elCats) elCats.innerHTML = CATS.map(c => {
     const items = yr.filter(e => e.category === c.id);
     const sum   = items.reduce((s,e) => s+(e.amount||0), 0);
     return `<div class="cat-card cat-${c.id}" onclick="jumpHistory('${c.id}')">
