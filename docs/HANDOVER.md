@@ -159,9 +159,18 @@ Every expense is assigned on save via `taxYear(date)`:
 - **The date field in the form drives this — backdated entries work automatically**
 
 ### HMRC Mileage
-- Default rate: 45p (0.45) per mile — first 10,000 miles
-- Over 10,000 miles: 25p (0.25) — user changes rate in Settings
-- Claim = miles × rate, stored in `expenses.amount`
+- Standard rate: first 10,000 miles per tax year. Auto-selected by the
+  entry's **date** via `MILEAGE_RATE_HISTORY` / `mileageRateFor()` (in the
+  "UK TAX YEAR" area of the script) — 45p up to 5 Apr 2026, 55p from
+  6 Apr 2026 onward. Add a new `{ from, rate }` row there whenever HMRC
+  changes this rate again; no other code needs to change.
+- Over 10,000 miles in a tax year: 25p (0.25) — unchanged by the above.
+  The user sets this manually in Settings once they cross the threshold;
+  once a manual rate is saved (`localStorage.mileageRate`), the app stops
+  auto-varying the rate by date and always uses that pinned value instead.
+- Claim = miles × rate, stored in `expenses.amount`. Each expense stores
+  its own `mileage_rate` at save time, so past entries are never affected
+  by a later HMRC rate change or Settings edit.
 
 ### Proportional Expenses (Phone / Home / Equipment)
 - User enters total bill + ministry use %
