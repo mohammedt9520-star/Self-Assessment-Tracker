@@ -1259,12 +1259,37 @@ function esc(s) {
 
 
 /* ═══════════════════════════════════════════════
+   HMRC MILEAGE RATE — history by date
+   Add a new { from, rate } row here whenever HMRC changes
+   the Approved Mileage Allowance Payment rate for cars/vans.
+   Rows must stay in ascending date order.
+═══════════════════════════════════════════════ */
+const MILEAGE_RATE_HISTORY = [
+  { from: '2011-04-06', rate: 0.45 }, // AMAP rate, unchanged 2011/12–2025/26
+  { from: '2026-04-06', rate: 0.55 }, // 2026/27 onward
+];
+function mileageRateFor(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  let rate = MILEAGE_RATE_HISTORY[0].rate;
+  for (const r of MILEAGE_RATE_HISTORY) {
+    if (d >= new Date(r.from + 'T00:00:00')) rate = r.rate;
+  }
+  return rate;
+}
+// Returns the auto rate for a date, or null if the user has pinned their
+// own default in Settings (e.g. the 25p over-10,000-miles rate) — in that
+// case we never silently override their choice.
+function mileageAutoRate(dateStr) {
+  return localStorage.getItem('mileageRate') ? null : mileageRateFor(dateStr);
+}
+
+/* ═══════════════════════════════════════════════
    CONFIG
 ═══════════════════════════════════════════════ */
 const CFG = {
   sbUrl: 'https://uiyonwhqbidbaubjbyqk.supabase.co',
   sbKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpeW9ud2hxYmlkYmF1YmpieXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODgyOTIsImV4cCI6MjA5Nzk2NDI5Mn0.IQdcuExcZxREewtSzA4pndBocWyTkJk4FjiAd461p8A',
-  rate:  0.45,
+  rate:  mileageRateFor(new Date().toISOString().slice(0,10)),
   homeAddress: '',
   workAddress: '',
 };
@@ -2584,7 +2609,7 @@ function buildForm(cat) {
     <div id="dist-res" class="hidden"></div>
     <div class="field-row">
       <div class="field"><label>Miles</label><input type="number" id="f-miles" step="0.1" placeholder="0.0" oninput="calcClaim()"></div>
-      <div class="field"><label>Rate (£/mi)</label><input type="number" id="f-rate" step="0.01" value="${CFG.rate}" oninput="calcClaim()"></div>
+      <div class="field"><label>Rate (£/mi)</label><input type="number" id="f-rate" step="0.01" value="${mileageAutoRate(today) ?? CFG.rate}" data-auto="${mileageAutoRate(today) ?? ''}" oninput="calcClaim()"></div>
     </div>
     <div class="field"><label>Claim Value</label><input type="number" id="f-claim" step="0.01" placeholder="0.00"></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Additional details" maxlength="500"></textarea></div>
@@ -2809,6 +2834,23 @@ function updateDateTags() {
   // Also update the summary
   updateDateSummary();
   updateSaveSummary();
+  refreshMileageRate();
+}
+
+// Keep the mileage rate in sync with the (first) selected date, unless the
+// user has pinned their own default rate in Settings or hand-edited the
+// field away from the auto-filled value for this date.
+function refreshMileageRate() {
+  const rateInput = document.getElementById('f-rate');
+  const dateInput = document.querySelector('.exp-date');
+  if (!rateInput || !dateInput?.value) return;
+  const auto = mileageAutoRate(dateInput.value);
+  if (auto == null) return;
+  if (parseFloat(rateInput.dataset.auto) === parseFloat(rateInput.value)) {
+    rateInput.value = auto;
+    rateInput.dataset.auto = auto;
+    calcClaim();
+  }
 }
 
 // Show dates summary below the list
