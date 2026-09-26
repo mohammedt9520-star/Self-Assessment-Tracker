@@ -7,11 +7,12 @@
 create extension if not exists "uuid-ossp";
 
 -- ── Clean slate (safe to re-run) ────────────────────────────────
-drop table if exists public.evidence      cascade;
-drop table if exists public.activity_logs cascade;
-drop table if exists public.expenses      cascade;
-drop table if exists public.profiles      cascade;
-drop table if exists public.tax_years     cascade;
+drop table if exists public.evidence          cascade;
+drop table if exists public.activity_logs     cascade;
+drop table if exists public.tax_year_status   cascade;
+drop table if exists public.expenses          cascade;
+drop table if exists public.profiles          cascade;
+drop table if exists public.tax_years         cascade;
 
 -- ================================================================
 --  PROFILES — auto-created when user signs up
@@ -182,6 +183,60 @@ $$;
 create trigger trg_auto_activity
   after insert on public.expenses
   for each row execute function public.auto_activity_log();
+
+-- ================================================================
+--  TAX YEAR STATUS — confirmed refund + lock state, per user/year
+--  Once locked=true, the trigger below blocks any insert/update/delete
+--  on public.expenses for that user's entries in that tax year.
+-- ================================================================
+create table public.tax_year_status (
+  user_id       uuid not null references public.profiles(id) on delete cascade,
+  tax_year      text not null references public.tax_years(slug),
+  refund_amount numeric(10,2) check (refund_amount >= 0),
+  locked        boolean not null default true,
+  updated_at    timestamptz default now(),
+  primary key (user_id, tax_year)
+);
+alter table public.tax_year_status enable row level security;
+create policy "Users manage own tax year status"
+  on public.tax_year_status for all
+  using  (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create or replace function public.touch_tax_year_status()
+returns trigger language plpgsql as $$
+begin new.updated_at = now(); return new; end;
+$$;
+create trigger trg_tax_year_status_updated
+  before update on public.tax_year_status
+  for each row execute function public.touch_tax_year_status();
+
+-- Server-side enforcement — belt-and-braces alongside the app's own
+-- checks, so a closed tax year truly cannot be written to.
+create or replace function public.enforce_tax_year_lock()
+returns trigger language plpgsql security definer as $$
+declare
+  affected_user uuid := coalesce(new.user_id, old.user_id);
+  affected_year text := case when tg_op = 'DELETE' then old.tax_year else new.tax_year end;
+begin
+  if exists (
+    select 1 from public.tax_year_status
+    where user_id = affected_user and tax_year = affected_year and locked = true
+  ) then
+    raise exception 'Tax year % is closed — unlock it before adding, editing or deleting entries.', affected_year;
+  end if;
+  if tg_op = 'UPDATE' and exists (
+    select 1 from public.tax_year_status
+    where user_id = old.user_id and tax_year = old.tax_year and locked = true
+  ) then
+    raise exception 'Tax year % is closed — unlock it before adding, editing or deleting entries.', old.tax_year;
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+create trigger trg_enforce_tax_year_lock
+  before insert or update or delete on public.expenses
+  for each row execute function public.enforce_tax_year_lock();
 
 -- ================================================================
 --  USEFUL VIEWS

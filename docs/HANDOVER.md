@@ -27,6 +27,7 @@ Supabase                  Database + Auth
   └── public.evidence     Receipt attachments (future)
   └── public.activity_logs Auto-created from mileage
   └── public.tax_years    Reference table (2021-2028)
+  └── public.tax_year_status  Per-user lock state + confirmed refund per tax year
 ```
 
 ---
@@ -179,6 +180,25 @@ Every expense is assigned on save via `taxYear(date)`:
 ### Row Level Security
 Every Supabase table has RLS. Users can only read/write rows where `user_id = auth.uid()`.
 This is enforced at database level — even if someone manipulates the JS they cannot access other users' data.
+
+### Tax Year Lock (confirm refund & close a tax year)
+- Dashboard hero pills let the user confirm the HMRC refund they received
+  for the currently selected tax year (`openConfirmRefund()` → writes to
+  `public.tax_year_status` via `setTaxYearLock()`).
+- Confirming **locks** that tax year: no new expenses, edits or deletes
+  are allowed for it — enforced both in the app (`isYearClosed()` checked
+  in `saveExp()`, `delExp()`, `submitForm()`) and in the database itself
+  (`trg_enforce_tax_year_lock` trigger on `public.expenses` — belt and
+  braces, mirrors the RLS pattern above).
+- Locked years drop out of the Dashboard's tab row into a "🔒 Previous"
+  dropdown; their data stays fully visible (dimmed, not hidden).
+- Tapping the "🔒 Closed" pill force-unlocks the year (`confirmUnlockYear()`
+  / `doUnlockYear()`) without discarding the confirmed refund amount —
+  unlocking just re-opens the year for edits, and the refund badge keeps
+  showing. Re-locking re-confirms (or updates) the same amount.
+- Fresh installs get this table from `supabase/schema.sql`. An existing
+  live database should instead run `supabase/migration_tax_year_lock.sql`,
+  which only adds the new table/trigger and never touches existing data.
 
 ---
 

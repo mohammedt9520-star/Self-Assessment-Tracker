@@ -293,6 +293,12 @@ input, select, textarea { font-family: inherit; }
 .ty-tab.active {
   background: var(--gold); color: var(--forest-deep); border-color: var(--gold);
 }
+select.ty-tab.ty-prev {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background-color: rgba(200,168,75,0.08);
+  border-color: rgba(200,168,75,0.35);
+  color: var(--gold-warm);
+}
 
 /* Hero Total */
 .hero-total {
@@ -323,6 +329,14 @@ input, select, textarea { font-family: inherit; }
   font-size: 12px; color: var(--mist);
 }
 .hp-pill strong { color: var(--gold-warm); font-weight: 600; }
+.hp-pill.hp-locked { background: rgba(184,50,50,0.14); border-color: rgba(184,50,50,0.35); color: #e8b0b0; cursor: pointer; }
+.hp-pill.hp-locked strong { color: #f0c4c4; }
+.hp-pill.hp-refund { background: rgba(200,168,75,0.12); border-color: rgba(200,168,75,0.3); }
+.hp-pill.hp-action { cursor: pointer; border-style: dashed; }
+.hp-pill.hp-action:active { opacity: 0.7; }
+
+/* Locked tax year — data stays visible, just visually archived */
+.year-locked { opacity: 0.55; }
 
 /* Category Cards */
 .section-label {
@@ -852,6 +866,11 @@ input, select, textarea { font-family: inherit; }
   padding:3px 8px; white-space:nowrap; flex-shrink:0;
 }
 .date-row .ty-tag.prev { color:var(--gold); background:rgba(200,168,75,.12); }
+.date-row .ty-tag.locked { color:var(--danger); background:rgba(184,50,50,.12); }
+.date-lock-warning {
+  margin-top:8px; padding:10px 12px; border-radius:var(--r-md);
+  background:var(--danger-bg); color:var(--danger); font-size:12px; font-weight:600;
+}
 .date-remove {
   width:30px; height:30px; border-radius:50%;
   background:var(--danger-bg); color:var(--danger);
@@ -1298,6 +1317,7 @@ const CFG = {
    STATE
 ═══════════════════════════════════════════════ */
 let _db = null, me = null, expenses = [], hFilter = 'all', hYear = null, dashYear = null, editingId = null;
+let yearStatus = {}; // { [tax_year]: { locked, refund_amount } } — confirmed/locked tax years
 
 /* ═══════════════════════════════════════════════
    SUPABASE
@@ -1371,7 +1391,7 @@ async function boot() {
   try {
     const { data:{ session }, error } = await _db.auth.getSession();
     if (error) throw error;
-    if (session?.user) { me = session.user; await fetchExp(); dashYear = nowYear(); anYear = nowYear(); showApp(); }
+    if (session?.user) { me = session.user; await fetchExp(); await fetchYearStatus(); dashYear = nowYear(); anYear = nowYear(); showApp(); }
     else showAuth();
   } catch(err) {
     console.error('Boot error:', err);
@@ -1381,9 +1401,9 @@ async function boot() {
   _db.auth.onAuthStateChange(async (ev, ses) => {
     try {
       if (ev === 'SIGNED_IN' && ses?.user) {
-        me = ses.user; await fetchExp(); dashYear = nowYear(); anYear = nowYear(); showApp();
+        me = ses.user; await fetchExp(); await fetchYearStatus(); dashYear = nowYear(); anYear = nowYear(); showApp();
       }
-      if (ev === 'SIGNED_OUT') { me = null; expenses = []; showAuth(); }
+      if (ev === 'SIGNED_OUT') { me = null; expenses = []; yearStatus = {}; showAuth(); }
     } catch(err) { console.error('Auth change error:', err); }
   });
 }
@@ -1452,6 +1472,10 @@ async function fetchExp() {
 async function saveExp(p) {
   p.user_id = me.id;
   assignTaxYear(p); // AUTO-ASSIGNS TAX YEAR FROM DATE
+  if (isYearClosed(p.tax_year)) {
+    toast(`${taxYearShort(p.tax_year)} is closed — unlock it from the Dashboard first`, 'err');
+    return false;
+  }
   p.created_at = new Date().toISOString();
   if (_db) {
     const { data, error } = await _db.from('expenses').insert([p]).select().single();
@@ -1465,6 +1489,11 @@ async function saveExp(p) {
   return true;
 }
 async function delExp(id) {
+  const existing = expenses.find(e => e.id === id);
+  if (existing && isYearClosed(existing.tax_year)) {
+    toast(`${taxYearShort(existing.tax_year)} is closed — unlock it from the Dashboard first`, 'err');
+    return;
+  }
   if (_db) {
     const { error } = await _db.from('expenses').delete().eq('id', id);
     if (error) { toast(error.message,'err'); return; }
@@ -1472,6 +1501,58 @@ async function delExp(id) {
   expenses = expenses.filter(e => e.id !== id);
   refreshDash(); if (document.getElementById('s-history').classList.contains('active')) renderHistory();
   toast('Deleted');
+}
+
+/* ═══════════════════════════════════════════════
+   TAX YEAR LOCK — confirm refund & close a tax year
+═══════════════════════════════════════════════ */
+async function fetchYearStatus() {
+  yearStatus = {};
+  if (!_db || !me) return;
+  const { data } = await _db.from('tax_year_status').select('*').eq('user_id', me.id);
+  if (data) data.forEach(r => { yearStatus[r.tax_year] = r; });
+}
+function isYearClosed(ty) { return !!yearStatus[ty]?.locked; }
+function yearRefund(ty)   { return yearStatus[ty]?.refund_amount ?? null; }
+
+async function setTaxYearLock(ty, refundAmount, locked) {
+  if (!_db || !me) return false;
+  const payload = { user_id: me.id, tax_year: ty, refund_amount: refundAmount, locked, updated_at: new Date().toISOString() };
+  const { data, error } = await _db.from('tax_year_status').upsert(payload, { onConflict: 'user_id,tax_year' }).select().single();
+  if (error) { toast(error.message, 'err'); return false; }
+  yearStatus[ty] = data;
+  return true;
+}
+
+function openConfirmRefund(ty) {
+  const prevAmount = yearRefund(ty);
+  document.getElementById('set-title').textContent = 'Confirm Tax Refund';
+  document.getElementById('set-body').innerHTML = `
+    <div class="field"><label>Refund received for ${taxYearShort(ty)} (£)</label>
+      <input type="number" id="cr-amount" step="0.01" placeholder="0.00" value="${prevAmount ?? ''}">
+      <div class="hint">Once confirmed, ${taxYearShort(ty)} locks — no new or edited entries for that tax year until you unlock it again.</div>
+    </div>
+    <button class="btn btn-gold" onclick="saveConfirmRefund('${ty}')">Confirm &amp; Lock Year</button>`;
+  openOv('ov-set');
+}
+async function saveConfirmRefund(ty) {
+  const amt = parseFloat(document.getElementById('cr-amount')?.value);
+  if (isNaN(amt) || amt < 0) { toast('Enter a valid refund amount', 'err'); return; }
+  const ok = await setTaxYearLock(ty, amt, true);
+  if (ok) { closeOv('ov-set'); toast(`${taxYearShort(ty)} locked ✓`); refreshDash(); }
+}
+function confirmUnlockYear(ty) {
+  const amt = yearRefund(ty);
+  document.getElementById('set-title').textContent = 'Unlock Tax Year';
+  document.getElementById('set-body').innerHTML = `
+    <div class="hint" style="margin-bottom:16px">${taxYearShort(ty)} is closed${amt!=null?` — refund confirmed at ${fmt(amt)}`:''}. Unlocking lets you add and edit entries for this tax year again.</div>
+    <button class="btn btn-gold" onclick="doUnlockYear('${ty}')">Unlock ${taxYearShort(ty)}</button>
+    <button class="btn btn-outline mt-8" style="width:100%" onclick="closeOv('ov-set')">Cancel</button>`;
+  openOv('ov-set');
+}
+async function doUnlockYear(ty) {
+  const ok = await setTaxYearLock(ty, yearRefund(ty), false);
+  if (ok) { closeOv('ov-set'); toast(`${taxYearShort(ty)} unlocked`); refreshDash(); }
 }
 
 /* ═══════════════════════════════════════════════
@@ -1497,13 +1578,24 @@ function showScreen(name, idx) {
 function refreshDash() {
   const years = allYears();
   if (!dashYear || !years.includes(dashYear)) dashYear = nowYear();
+  const openYears   = years.filter(y => !isYearClosed(y));
+  const lockedYears = years.filter(y =>  isYearClosed(y));
 
-  // Tax year tabs
+  // Tax year tabs — only active (unlocked) years show as tabs; closed
+  // years move into the "Previous" dropdown so the tab row stays short
+  // once a year's been confirmed and submitted.
   const tabs = document.getElementById('dash-ty-tabs');
-  if (tabs) tabs.innerHTML = years.map(y => `
+  if (tabs) tabs.innerHTML = openYears.map(y => `
     <button class="ty-tab${y===dashYear?' active':''}" onclick="setDashYear('${y}')">
       ${taxYearShort(y)}${isCurrentYear(y)?'  ●':''}
-    </button>`).join('');
+    </button>`).join('') + (lockedYears.length ? `
+    <select class="ty-tab ty-prev" onchange="if(this.value) setDashYear(this.value)">
+      <option value="">🔒 Previous</option>
+      ${lockedYears.map(y => `<option value="${y}"${y===dashYear?' selected':''}>${taxYearShort(y)} 🔒</option>`).join('')}
+    </select>` : '');
+
+  const isLocked = isYearClosed(dashYear);
+  const refund   = yearRefund(dashYear);
 
   // Filtered expenses for selected year
   const yr = expenses.filter(e => e.tax_year === dashYear);
@@ -1518,7 +1610,7 @@ function refreshDash() {
   const elCats   = document.getElementById('dash-cat-grid');
   const elRecent = document.getElementById('dash-recent');
 
-  if (elYrLbl)  elYrLbl.textContent  = isCurrentYear(dashYear) ? 'Current Tax Year' : taxYearLabel(dashYear);
+  if (elYrLbl)  elYrLbl.textContent  = (isCurrentYear(dashYear) ? 'Current Tax Year' : taxYearLabel(dashYear)) + (isLocked ? ' · Closed' : '');
   if (elTotal)  elTotal.textContent  = fmtK(total);
   if (elCount)  elCount.textContent  = yr.length;
   if (elGreet)  elGreet.textContent  = greeting();
@@ -1528,7 +1620,15 @@ function refreshDash() {
     totalMiles > 0 ? `<div class="hp-pill">🚗 <strong>${totalMiles.toFixed(0)} mi</strong></div>` : '',
     `<div class="hp-pill">📅 <strong>${taxYearShort(dashYear)}</strong></div>`,
     yr.filter(e=>e.category==='mileage').length > 0 ? `<div class="hp-pill">⛽ <strong>${yr.filter(e=>e.category==='mileage').length} journeys</strong></div>` : '',
+    isLocked ? `<div class="hp-pill hp-locked" onclick="confirmUnlockYear('${dashYear}')">🔒 <strong>Closed</strong> — tap to unlock</div>` : '',
+    refund != null ? `<div class="hp-pill hp-refund">💰 Refunded <strong>${fmt(refund)}</strong></div>` : '',
+    !isLocked ? `<div class="hp-pill hp-action" onclick="openConfirmRefund('${dashYear}')">💰 ${refund!=null?'Re-confirm Refund':'Confirm Tax Refund'}</div>` : '',
   ].join('');
+
+  // Dim (but don't hide) category/recent data for a closed year — it's
+  // read-only, still fully visible, just visually marked as archived
+  if (elCats)   elCats.classList.toggle('year-locked', isLocked);
+  if (elRecent) elRecent.classList.toggle('year-locked', isLocked);
 
   // Category cards
   const CATS = [
@@ -1673,6 +1773,7 @@ function showDetail(id) {
   if (!e) return;
   document.getElementById('det-title').textContent = catLabel(e.category);
   const isCurrent = isCurrentYear(e.tax_year);
+  const locked = isYearClosed(e.tax_year);
   document.getElementById('det-body').innerHTML = `
     <div class="det-amount-row">
       <div class="det-cat-pill cat-${e.category}" style="background:var(--cc-bg);color:var(--cc-accent)">${catIcon(e.category)} ${catLabel(e.category)}</div>
@@ -1688,11 +1789,16 @@ function showDetail(id) {
       ${e.notes          ? dRow('Notes', esc(e.notes))          : ''}
       ${dRow('Tax Year', taxYearLabel(e.tax_year) + (isCurrent?' (Current)':''))}
     </div>
+    ${locked ? `
+    <div class="hint" style="margin-bottom:12px">🔒 ${taxYearShort(e.tax_year)} is closed — unlock it from the Dashboard to edit or delete this entry.</div>
+    <div class="btn-row" style="display:grid;grid-template-columns:1fr;gap:10px">
+      <button class="btn btn-outline" onclick="closeOv('ov-detail')">Close</button>
+    </div>` : `
     <div class="btn-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
       <button class="btn btn-danger" onclick="delExp('${esc(e.id)}');closeOv('ov-detail')">Delete</button>
       <button class="btn btn-gold" onclick="openEditForm('${esc(e.id)}')">Edit</button>
       <button class="btn btn-outline" onclick="closeOv('ov-detail')">Close</button>
-    </div>`;
+    </div>`}`;
   openOv('ov-detail');
 }
 function dRow(l, v) {
@@ -2502,6 +2608,7 @@ function openForm(cat) {
   returnJourneyOn = false;
   document.getElementById('form-title').textContent = 'Add '+catLabel(cat);
   document.getElementById('form-body').innerHTML = buildForm(cat);
+  updateDateTags();
   openOv('ov-form');
 }
 function openEditForm(id) {
@@ -2588,6 +2695,7 @@ function buildForm(cat) {
       Add another date
     </button>
     <div class="dates-summary hidden" id="dates-summary"></div>
+    <div class="date-lock-warning hidden" id="date-lock-warning"></div>
   </div>`;
 
   if (cat === 'mileage') return `${df}
@@ -2821,6 +2929,7 @@ function removeDateRow(btn) {
 // Update the tax year tags on all date rows
 function updateDateTags() {
   const rows = document.querySelectorAll('.date-row');
+  let anyLocked = false;
   rows.forEach(row => {
     const input = row.querySelector('input[type=date]');
     const tag   = row.querySelector('.ty-tag');
@@ -2828,13 +2937,24 @@ function updateDateTags() {
     const d = input.value;
     if (!d) return;
     const ty = taxYear(new Date(d + 'T12:00:00'));
-    tag.textContent = taxYearShort(ty);
-    tag.className   = 'ty-tag' + (isCurrentYear(ty) ? '' : ' prev');
+    const locked = isYearClosed(ty);
+    if (locked) anyLocked = true;
+    tag.textContent = taxYearShort(ty) + (locked ? ' 🔒' : '');
+    tag.className   = 'ty-tag' + (locked ? ' locked' : isCurrentYear(ty) ? '' : ' prev');
   });
   // Also update the summary
   updateDateSummary();
   updateSaveSummary();
   refreshMileageRate();
+
+  // Block saving if any selected date falls in a closed tax year
+  const warnEl = document.getElementById('date-lock-warning');
+  const submitBtn = document.getElementById('submit-btn');
+  if (warnEl) {
+    warnEl.classList.toggle('hidden', !anyLocked);
+    if (anyLocked) warnEl.textContent = '🔒 One or more of these dates falls in a closed tax year — unlock it from the Dashboard first.';
+  }
+  if (submitBtn && !editingId) submitBtn.disabled = anyLocked;
 }
 
 // Keep the mileage rate in sync with the (first) selected date, unless the
@@ -2956,6 +3076,15 @@ async function submitForm(cat) {
   const dates = getSelectedDates();
   if (!dates.length) { toast('Select at least one date', 'err'); return; }
 
+  if (!editingId) {
+    const lockedDate = dates.find(d => isYearClosed(taxYear(new Date(d + 'T12:00:00'))));
+    if (lockedDate) {
+      const ty = taxYear(new Date(lockedDate + 'T12:00:00'));
+      toast(`${taxYearShort(ty)} is closed — unlock it first`, 'err');
+      return;
+    }
+  }
+
   const btn = document.getElementById('submit-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spin-sm"></div> Saving…'; }
 
@@ -3009,6 +3138,8 @@ async function submitForm(cat) {
     if (editingId) {
       const date = document.querySelector('.exp-date')?.value || dates[0];
       if (!date) { toast('Date required', 'err'); return; }
+      const editTy = taxYear(new Date(date + 'T12:00:00'));
+      if (isYearClosed(editTy)) { toast(`${taxYearShort(editTy)} is closed — unlock it first`, 'err'); return; }
       const payload = { ...p, date };
       assignTaxYear(payload);
       const { data, error } = await _db.from('expenses').update(payload).eq('id', editingId).select().single();
