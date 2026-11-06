@@ -1,4 +1,4 @@
-const CACHE = 'ministry-v13';
+const CACHE = 'ministry-v14';
 const SHELL = ['/index.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
